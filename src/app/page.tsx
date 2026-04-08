@@ -20,7 +20,7 @@ export default function HomePage() {
 
         <header style={s.header}>
           <div style={s.logo}>
-            <div style={s.logoIcon}>E</div>
+            <img src="/images/edukard-logo.png" alt="EduKard" style={s.logoImg} />
             <span style={s.logoText}>EduKard</span>
           </div>
           <nav style={s.nav}>
@@ -248,7 +248,7 @@ export default function HomePage() {
         <div style={s.footerInner}>
           <div style={s.footerTop}>
             <div>
-              <div style={s.logo}><div style={s.logoIcon}>E</div><span style={s.logoText}>EduKard</span></div>
+              <div style={s.logo}><img src="/images/edukard-logo.png" alt="EduKard" style={s.logoImg} /><span style={s.logoText}>EduKard</span></div>
               <p style={s.footerAbout}>Tuition financing powered by payroll, built on blockchain transparency. A product of Arkad Technologies.</p>
             </div>
             <div style={s.footerCols}>
@@ -295,7 +295,7 @@ const s: Record<string, React.CSSProperties> = {
   heroGlowOrb2: { position: "absolute", bottom: "-100px", left: "-100px", width: "400px", height: "400px", borderRadius: "50%", background: "radial-gradient(circle, rgba(59,130,246,0.06), transparent 70%)", pointerEvents: "none", zIndex: 1 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 48px", maxWidth: "1400px", margin: "0 auto", position: "relative" as const, zIndex: 10 },
   logo: { display: "flex", alignItems: "center", gap: "10px" },
-  logoIcon: { width: "36px", height: "36px", borderRadius: "10px", background: "linear-gradient(135deg, #10B981, #059669)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "18px", color: "#fff", boxShadow: "0 0 20px rgba(16,185,129,0.3)" },
+  logoImg: { width: "38px", height: "38px", objectFit: "contain" as const, flexShrink: 0 },
   logoText: { fontSize: "22px", fontWeight: 700, color: "#F9FAFB", letterSpacing: "-0.5px" },
   nav: { display: "flex", alignItems: "center", gap: "8px" },
   navLink: { color: "rgba(255,255,255,0.5)", fontSize: "14px", fontWeight: 500, padding: "8px 14px", textDecoration: "none", cursor: "pointer" },

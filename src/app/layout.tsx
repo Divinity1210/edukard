@@ -7,6 +7,10 @@ export const metadata: Metadata = {
     "EduKard provides instant, fair tuition financing for employed international students in Canada. No credit score needed — powered by real-world asset (RWA) protocol.",
   keywords: ["tuition financing", "international students", "Canada", "student loans", "RWA", "fintech"],
   authors: [{ name: "Arkad Technologies" }],
+  icons: {
+    icon: "/images/edukard-logo.png",
+    apple: "/images/edukard-logo.png",
+  },
   openGraph: {
     title: "EduKard — Tuition Finance for International Students",
     description: "Instant tuition financing. No credit score needed.",

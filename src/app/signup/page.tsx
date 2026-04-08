@@ -18,7 +18,7 @@ function SignupForm() {
       <div style={s.glowOrb} />
       <div style={s.container}>
         <div style={s.card}>
-          <div style={s.logoRow}><div style={s.logoIcon}>E</div><span style={s.logoText}>EduKard</span></div>
+          <div style={s.logoRow}><img src="/images/edukard-logo.png" alt="EduKard" style={s.logoImg} /><span style={s.logoText}>EduKard</span></div>
           <h1 style={s.title}>Create your account</h1>
           <p style={s.subtitle}>Start your journey to fair tuition financing</p>
           <div style={s.roleSelector}>
@@ -49,7 +49,7 @@ const s: Record<string, React.CSSProperties> = {
   container: { width: "100%", maxWidth: "480px", position: "relative" as const, zIndex: 1 },
   card: { background: "rgba(17,24,39,0.6)", backdropFilter: "blur(20px)", border: "1px solid rgba(75,85,99,0.25)", borderRadius: "20px", padding: "40px 32px" },
   logoRow: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "32px", justifyContent: "center" },
-  logoIcon: { width: "36px", height: "36px", borderRadius: "10px", background: "linear-gradient(135deg, #10B981, #059669)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "18px", color: "#fff", boxShadow: "0 0 20px rgba(16,185,129,0.3)" },
+  logoImg: { width: "40px", height: "40px", objectFit: "contain" as const },
   logoText: { fontSize: "22px", fontWeight: 700, color: "#F9FAFB" },
   title: { fontSize: "24px", fontWeight: 700, color: "#F9FAFB", textAlign: "center" as const, marginBottom: "6px" },
   subtitle: { fontSize: "14px", color: "#6B7280", textAlign: "center" as const, marginBottom: "24px" },
