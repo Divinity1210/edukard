@@ -75,10 +75,7 @@ export default function DashboardLayout({ children, role, userName }: { children
         <div style={s.sidebarHeader}>
           <div style={s.logoRow} onClick={() => router.push("/")}>
             <img src="/images/edukard-logo.png" alt="EduKard" style={s.logoImg} />
-            <div>
-              <div style={s.logoText}>EduKard</div>
-              <div style={{ ...s.portalLabel, color }}>{ROLE_LABELS[role]}</div>
-            </div>
+            <div style={{ ...s.portalLabel, color }}>{ROLE_LABELS[role]}</div>
           </div>
           {/* Notification Bell */}
           <div style={{ position: "relative" as const }}>
@@ -139,8 +136,8 @@ const s: Record<string, React.CSSProperties> = {
   layout: { display: "flex", minHeight: "100vh", background: "#0A0F1E" },
   sidebar: { width: "260px", background: "rgba(10,15,30,0.95)", backdropFilter: "blur(20px)", borderRight: "1px solid rgba(75,85,99,0.15)", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 20 },
   sidebarHeader: { padding: "24px 20px 20px", borderBottom: "1px solid rgba(75,85,99,0.15)", display: "flex", justifyContent: "space-between", alignItems: "center" },
-  logoRow: { display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" },
-  logoImg: { width: "36px", height: "36px", objectFit: "contain" as const, flexShrink: 0 },
+  logoRow: { display: "flex", flexDirection: "column" as const, alignItems: "center", gap: "4px", cursor: "pointer" },
+  logoImg: { height: "40px", objectFit: "contain" as const, flexShrink: 0 },
   logoText: { fontSize: "18px", fontWeight: 700, color: "#F9FAFB", letterSpacing: "-0.5px" },
   portalLabel: { fontSize: "11px", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" as const, marginTop: "2px" },
   nav: { flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: "2px", overflowY: "auto" as const },
