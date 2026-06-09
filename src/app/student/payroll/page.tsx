@@ -2,6 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { getProfile, getPayrollConnections, getCreditAssessment } from "@/lib/data-access";
 import { formatCAD, formatDate } from "@/lib/calculations";
 import { integrationStatus } from "@/lib/integrations";
+import PlaidLinkButton from "./PlaidLinkButton";
 
 export const dynamic = "force-dynamic";
 
@@ -49,10 +50,7 @@ export default async function PayrollPage() {
             <p style={{ fontSize: "14px", color: "#6B7280", maxWidth: "440px", margin: "0 auto 20px", lineHeight: 1.6 }}>
               Securely connect your bank or payroll provider to verify income and unlock financing. EduKard uses read-only access via Plaid.
             </p>
-            <button style={{ ...s.authBtn, maxWidth: "320px", margin: "0 auto", opacity: plaidLive ? 1 : 0.6 }} disabled={!plaidLive}>
-              {plaidLive ? "Connect with Plaid →" : "Plaid not configured yet"}
-            </button>
-            {!plaidLive && <p style={{ fontSize: "12px", color: "#6B7280", marginTop: "10px" }}>Add PLAID_CLIENT_ID & PLAID_SECRET to enable the connection flow.</p>}
+            <PlaidLinkButton enabled={plaidLive} />
           </div>
         </div>
       )}
