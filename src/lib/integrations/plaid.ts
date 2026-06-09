@@ -66,22 +66,53 @@ export async function getAuth(accessToken: string) {
 }
 
 /**
- * Plaid signs webhooks with an ES256 JWT in the `plaid-verification` header.
- * Full verification requires fetching the rotating JWK and validating the
- * signature (recommended: add the `jose` package before production). Here we
- * perform the body-integrity portion: decode the (unverified) JWT and confirm
- * its `request_body_sha256` claim matches the actual body hash. This blocks
- * tampering; pair with JWK signature checking for full authenticity.
+ * Fetch a Plaid webhook verification key (a public JWK) by its key id. Plaid
+ * rotates these, so the `kid` from the JWT header tells us which to fetch.
+ * Requires Plaid credentials (client_id/secret).
  */
-export async function verifyWebhookBody(rawBody: string, jwtHeader: string | null): Promise<boolean> {
-  if (!jwtHeader) return false;
+async function getWebhookVerificationKey(keyId: string): Promise<JWK> {
+  const json = await plaidRequest<{ key: JWK }>("/webhook_verification_key/get", { key_id: keyId });
+  return json.key;
+}
+
+/**
+ * Full Plaid webhook verification.
+ *
+ * Plaid signs each webhook with an ES256 JWT in the `plaid-verification` header.
+ * Authenticity requires:
+ *   1. Decode the JWT header to read `alg` (must be ES256) and `kid`.
+ *   2. Fetch the matching public JWK from Plaid (rotating key).
+ *   3. Verify the JWT signature with that key and reject tokens older than 5 min.
+ *   4. Confirm the `request_body_sha256` claim equals the SHA-256 of the raw body
+ *      (constant-time compare) so the payload can't be swapped after signing.
+ *
+ * Returns true only when every check passes. Never throws.
+ */
+export async function verifyWebhook(rawBody: string, jwtHeader: string | null): Promise<boolean> {
+  if (!jwtHeader || !isConfigured()) return false;
   try {
+    const { decodeProtectedHeader, importJWK, jwtVerify } = await import("jose");
     const crypto = await import("crypto");
-    const [, payloadB64] = jwtHeader.split(".");
-    const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
-    const bodyHash = crypto.createHash("sha256").update(rawBody).digest("hex");
-    return claims.request_body_sha256 === bodyHash;
+
+    const header = decodeProtectedHeader(jwtHeader);
+    if (header.alg !== "ES256" || !header.kid) return false;
+
+    const jwk = await getWebhookVerificationKey(header.kid);
+    const key = await importJWK(jwk, "ES256");
+
+    // Verifies signature AND rejects tokens issued more than 5 minutes ago.
+    const { payload } = await jwtVerify(jwtHeader, key, {
+      algorithms: ["ES256"],
+      maxTokenAge: "5 min",
+    });
+
+    const claimHash = String(payload.request_body_sha256 ?? "");
+    const bodyHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
+    if (claimHash.length !== bodyHash.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(claimHash), Buffer.from(bodyHash));
   } catch {
     return false;
   }
 }
+
+type JWK = Record<string, unknown>;

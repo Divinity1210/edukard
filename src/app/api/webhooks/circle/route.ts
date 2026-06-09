@@ -1,30 +1,41 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { verifyWebhookSecret } from "@/lib/integrations/circle";
+import { isAllowedSnsUrl, verifySnsMessage, verifyWebhookSecret } from "@/lib/integrations/circle";
 
 /**
  * Circle webhook — USDC transfer lifecycle (deposits, disbursements,
  * settlements). Delivered via AWS SNS.
  *
- * Pilot security: a shared-secret header (CIRCLE_WEBHOOK_SECRET) gates the
- * endpoint. Before mainnet, replace with SNS X.509 cert signature verification.
+ * Security (refuse-by-default):
+ *   1. Every envelope must carry a valid AWS SNS X.509 signature.
+ *   2. The SubscribeURL/SigningCertURL must be a real AWS SNS host (SSRF guard).
+ *   3. Optional shared-secret header (CIRCLE_WEBHOOK_SECRET) as defence-in-depth.
  */
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
     const body = JSON.parse(rawBody);
 
-    // SNS subscription handshake.
-    if (body.Type === "SubscriptionConfirmation" && body.SubscribeURL) {
-      await fetch(body.SubscribeURL);
-      return NextResponse.json({ status: "subscribed" });
+    // 1. Authenticate the SNS envelope before doing ANYTHING with its contents.
+    const signed = await verifySnsMessage(body);
+    if (!signed) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
+    // 2. Optional defence-in-depth shared secret, enforced only when configured.
     if (process.env.CIRCLE_WEBHOOK_SECRET) {
-      const headerSecret = req.headers.get("x-circle-secret");
-      if (!verifyWebhookSecret(headerSecret)) {
-        return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+      if (!verifyWebhookSecret(req.headers.get("x-circle-secret"))) {
+        return NextResponse.json({ error: "Invalid secret" }, { status: 401 });
       }
+    }
+
+    // 3. SNS subscription handshake — only confirm an allow-listed AWS URL.
+    if (body.Type === "SubscriptionConfirmation" && body.SubscribeURL) {
+      if (!isAllowedSnsUrl(body.SubscribeURL)) {
+        return NextResponse.json({ error: "Disallowed SubscribeURL" }, { status: 400 });
+      }
+      await fetch(body.SubscribeURL);
+      return NextResponse.json({ status: "subscribed" });
     }
 
     if (body.Type === "Notification") {

@@ -74,16 +74,84 @@ export async function getTransfer(transferId: string) {
   return circleRequest(`/v1/transfers/${transferId}`, "GET");
 }
 
+import crypto from "node:crypto";
+
+type SnsMessage = Record<string, string | undefined>;
+
 /**
- * Circle delivers webhooks via AWS SNS and signs the message with an X.509
- * cert referenced by `SigningCertURL`. Production verification should fetch
- * that cert and verify the RSA-SHA1 signature over the canonical SNS string.
- * For the pilot we expose a shared-secret HMAC fallback (CIRCLE_WEBHOOK_SECRET)
- * so the endpoint can be locked down immediately; swap in cert verification
- * when going live on mainnet.
+ * Only ever fetch AWS-owned HTTPS URLs (the signing cert and the subscribe
+ * confirmation). Without this guard, an attacker could POST a fake SNS envelope
+ * whose `SigningCertURL`/`SubscribeURL` points at an internal address, turning
+ * the webhook into an SSRF probe. Hostname must be an `sns.<region>.amazonaws.com`.
+ */
+export function isAllowedSnsUrl(raw: string | undefined | null): boolean {
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return false;
+    return /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the canonical string AWS signs, per the SNS message-signature spec:
+ * specific fields, in alphabetical order, each as `key\nvalue\n`.
+ */
+function buildStringToSign(msg: SnsMessage): string | null {
+  let keys: string[];
+  if (msg.Type === "Notification") {
+    keys =
+      msg.Subject !== undefined
+        ? ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"]
+        : ["Message", "MessageId", "Timestamp", "TopicArn", "Type"];
+  } else if (msg.Type === "SubscriptionConfirmation" || msg.Type === "UnsubscribeConfirmation") {
+    keys = ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"];
+  } else {
+    return null;
+  }
+  let out = "";
+  for (const k of keys) {
+    const v = msg[k];
+    if (v === undefined) return null;
+    out += `${k}\n${v}\n`;
+  }
+  return out;
+}
+
+/**
+ * Verify an AWS SNS message's X.509 signature. Fetches the (allow-listed)
+ * signing certificate and checks the RSA signature over the canonical string.
+ * SignatureVersion "1" = RSA-SHA1, "2" = RSA-SHA256. Never throws.
+ */
+export async function verifySnsMessage(msg: SnsMessage): Promise<boolean> {
+  try {
+    if (!isAllowedSnsUrl(msg.SigningCertURL)) return false;
+    const stringToSign = buildStringToSign(msg);
+    if (!stringToSign || !msg.Signature) return false;
+
+    const res = await fetch(msg.SigningCertURL as string);
+    if (!res.ok) return false;
+    const pem = await res.text();
+
+    const algorithm = msg.SignatureVersion === "2" ? "RSA-SHA256" : "RSA-SHA1";
+    const verifier = crypto.createVerify(algorithm);
+    verifier.update(stringToSign, "utf8");
+    return verifier.verify(pem, msg.Signature, "base64");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Optional defence-in-depth: a shared secret header you can configure in the
+ * Circle/SNS delivery. Returns true only when configured AND matching.
  */
 export function verifyWebhookSecret(headerSecret: string | null): boolean {
   const secret = process.env.CIRCLE_WEBHOOK_SECRET;
-  if (!secret) return false;
-  return headerSecret === secret;
+  if (!secret || !headerSecret) return false;
+  const a = Buffer.from(secret);
+  const b = Buffer.from(headerSecret);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

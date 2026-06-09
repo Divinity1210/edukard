@@ -1,21 +1,24 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { verifyWebhookBody } from "@/lib/integrations/plaid";
+import { isConfigured as plaidConfigured, verifyWebhook } from "@/lib/integrations/plaid";
 
 /**
  * Plaid webhook — item health + income/payroll verification readiness.
- * Body integrity is checked against the plaid-verification JWT claim.
+ * Authenticity is enforced via full ES256 JWT verification (see plaid.ts).
+ * Refuse-by-default: unverifiable requests never reach the database.
  */
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
     const jwt = req.headers.get("plaid-verification");
 
-    // When a JWT is present, verify the body hash matches its claim.
-    if (jwt) {
-      const ok = await verifyWebhookBody(rawBody, jwt);
-      if (!ok) return NextResponse.json({ error: "Body verification failed" }, { status: 401 });
+    // Refuse if Plaid isn't configured — we cannot fetch the key to verify.
+    if (!plaidConfigured()) {
+      return NextResponse.json({ error: "Plaid webhook not configured" }, { status: 503 });
     }
+    // Every Plaid webhook carries a signed JWT. No valid JWT → reject.
+    const ok = await verifyWebhook(rawBody, jwt);
+    if (!ok) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
 
     const body = JSON.parse(rawBody);
     const { webhook_type, webhook_code, item_id, error } = body;

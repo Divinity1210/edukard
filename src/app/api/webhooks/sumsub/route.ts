@@ -13,11 +13,13 @@ export async function POST(req: Request) {
     const digest = req.headers.get("x-payload-digest");
     const alg = req.headers.get("x-payload-digest-alg");
 
-    // Enforce signature when a webhook secret is configured.
-    if (process.env.SUMSUB_WEBHOOK_SECRET) {
-      if (!verifyWebhook(rawBody, digest, alg)) {
-        return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-      }
+    // Refuse-by-default: without a secret we cannot authenticate the payload,
+    // so we never process it (prevents forged KYC approvals).
+    if (!process.env.SUMSUB_WEBHOOK_SECRET) {
+      return NextResponse.json({ error: "Sumsub webhook not configured" }, { status: 503 });
+    }
+    if (!verifyWebhook(rawBody, digest, alg)) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
     const body = JSON.parse(rawBody);
