@@ -1,36 +1,51 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_AUDIT_LOG } from "@/lib/mock-data";
+import { getProfile, getAdminAuditLogs } from "@/lib/data-access";
 
-const EXTENDED_LOG = [
-  { id: "al-1", user: "Admin", action: "Approved loan application", entity: "loan-001", time: "Feb 20, 2026 2:30 PM", ip: "192.168.1.x" },
-  { id: "al-2", user: "System", action: "Disbursed funds to University of Toronto", entity: "loan-001", time: "Mar 1, 2026 9:00 AM", ip: "—" },
-  { id: "al-3", user: "System", action: "PAD payment collected", entity: "payment-001", time: "Mar 1, 2026 10:00 AM", ip: "—" },
-  { id: "al-4", user: "Amara Okafor", action: "Updated bank account details", entity: "profile-001", time: "Mar 5, 2026 3:15 PM", ip: "24.114.x.x" },
-  { id: "al-5", user: "System", action: "PAD payment collected", entity: "payment-002", time: "Apr 1, 2026 10:00 AM", ip: "—" },
-  { id: "al-6", user: "Admin", action: "Flagged account for review", entity: "user-s-004", time: "Apr 1, 2026 11:30 AM", ip: "192.168.1.x" },
-  { id: "al-7", user: "Marcus Chen", action: "Deposited $25,000 to Junior tranche", entity: "inv-002", time: "Jan 20, 2026 10:00 AM", ip: "68.148.x.x" },
-  { id: "al-8", user: "Admin", action: "Paused loan originations", entity: "treasury", time: "Apr 2, 2026 2:00 PM", ip: "192.168.1.x" },
-];
+export const dynamic = "force-dynamic";
 
-export default function AuditLogPage() {
+function formatTime(ts: string) {
+  return new Date(ts).toLocaleString("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+type AuditRow = {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  ip_address: string | null;
+  created_at: string;
+  actor: { full_name: string | null; role: string | null } | null;
+};
+
+export default async function AuditLogPage() {
+  const profile = await getProfile();
+  const logs = (await getAdminAuditLogs(200)) as AuditRow[];
+
   return (
-    <DashboardLayout role="admin" userName="Admin User">
+    <DashboardLayout role="admin" userName={profile?.full_name || "Admin User"}>
       <h1 style={s.title}>Audit Log</h1>
       <p style={s.subtitle}>Immutable record of all actions for compliance and forensic analysis.</p>
 
       <div style={s.tableCard}>
         <table style={s.table}>
-          <thead><tr>{["Timestamp", "User", "Action", "Entity", "IP"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Timestamp", "Actor", "Action", "Entity", "IP"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {EXTENDED_LOG.map((entry) => (
+            {logs.length === 0 && (
+              <tr><td style={{ ...s.td, textAlign: "center", color: "#6B7280" }} colSpan={5}>No audit events recorded yet.</td></tr>
+            )}
+            {logs.map((entry) => (
               <tr key={entry.id}>
-                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px", color: "#6B7280" }}>{entry.time}</td>
-                <td style={{ ...s.td, fontWeight: 600 }}>{entry.user}</td>
+                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px", color: "#6B7280" }}>{formatTime(entry.created_at)}</td>
+                <td style={{ ...s.td, fontWeight: 600 }}>{entry.actor?.full_name || (entry.actor?.role ? entry.actor.role : "System")}</td>
                 <td style={s.td}>{entry.action}</td>
-                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px" }}>{entry.entity}</td>
-                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px", color: "#6B7280" }}>{entry.ip}</td>
+                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px" }}>{entry.entity_type}{entry.entity_id ? `:${entry.entity_id.slice(0, 8)}` : ""}</td>
+                <td style={{ ...s.td, fontFamily: "monospace", fontSize: "12px", color: "#6B7280" }}>{entry.ip_address || "—"}</td>
               </tr>
             ))}
           </tbody>

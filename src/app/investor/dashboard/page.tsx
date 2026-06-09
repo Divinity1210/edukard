@@ -1,20 +1,52 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_INVESTOR_STATS, MOCK_INVESTMENTS, MOCK_PORTFOLIO_HISTORY, MOCK_POOLS } from "@/lib/mock-data";
+import { getProfile, getInvestorStats, getInvestments, getLiquidityPools } from "@/lib/data-access";
 import { formatCAD, formatPercent, calculateAccruedYield } from "@/lib/calculations";
 
-export default function InvestorDashboard() {
-  const stats = MOCK_INVESTOR_STATS;
-  const investments = MOCK_INVESTMENTS;
-  const history = MOCK_PORTFOLIO_HISTORY;
-  const pools = MOCK_POOLS;
+export const dynamic = "force-dynamic";
+
+export default async function InvestorDashboard() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const stats = await getInvestorStats(profile.id);
+  const investments = await getInvestments(profile.id);
+  const pools = await getLiquidityPools();
+  
+  // Portfolio growth is derived from real holdings: for each of the last 6
+  // month-ends we sum principal + yield accrued to that date across all
+  // investments. (A daily snapshot cron can later replace this with point-in-time
+  // values; until then this reflects actual positions rather than mock figures.)
+  const history = Array.from({ length: 6 }).map((_, idx) => {
+    const snapshot = new Date();
+    snapshot.setMonth(snapshot.getMonth() - (5 - idx));
+    const snapMs = snapshot.getTime();
+    const value = investments.reduce((sum, inv) => {
+      const investedMs = new Date(inv.invested_at).getTime();
+      if (investedMs > snapMs) return sum;
+      const days = Math.max(0, Math.floor((snapMs - investedMs) / 86400000));
+      return (
+        sum +
+        Number(inv.principal) +
+        calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), days)
+      );
+    }, 0);
+    return { date: snapshot.toLocaleDateString("en-CA", { month: "short" }), value };
+  });
+  const histValues = history.map((h) => h.value);
+  const chartMin = Math.min(...histValues) * 0.98;
+  const chartMax = Math.max(...histValues) * 1.02;
+  const chartRange = chartMax - chartMin;
+
+  const firstName = profile.full_name?.split(" ")[0] || "Investor";
 
   // Calculate days since investment for daily accrual
   const getDaysSince = (dateStr: string) => Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
 
   return (
-    <DashboardLayout role="investor" userName="Marcus Chen">
+    <DashboardLayout role="investor" userName={profile.full_name || "Investor"}>
       {/* Welcome Banner */}
       <div style={s.banner}>
         <img src="/images/investor-growth.png" alt="Investment growth" style={s.bannerImg} />
@@ -28,10 +60,10 @@ export default function InvestorDashboard() {
 
       <div style={s.statsGrid}>
         {[
-          { label: "Portfolio Value", value: formatCAD(stats.portfolio_value), color: "#0D9488", icon: "💎" },
-          { label: "Total Invested", value: formatCAD(stats.total_invested), color: "#10B981", icon: "💰" },
-          { label: "Total Yield Earned", value: formatCAD(stats.total_yield), color: "#10B981", icon: "📈" },
-          { label: "Weighted APY", value: formatPercent(stats.weighted_apy), color: "#F59E0B", icon: "⚡" },
+          { label: "Portfolio Value", value: formatCAD(stats?.portfolio_value || 0), color: "#0D9488", icon: "💎" },
+          { label: "Total Invested", value: formatCAD(stats?.total_invested || 0), color: "#10B981", icon: "💰" },
+          { label: "Total Yield Earned", value: formatCAD(stats?.total_yield || 0), color: "#10B981", icon: "📈" },
+          { label: "Weighted APY", value: formatPercent(stats?.weighted_apy || 0), color: "#F59E0B", icon: "⚡" },
         ].map((stat) => (
           <div key={stat.label} style={s.statCard}>
             <div style={s.statHeader}><span style={{ ...s.statIconBg, background: `${stat.color}10`, color: stat.color }}>{stat.icon}</span><span style={s.statLabel}>{stat.label}</span></div>
@@ -40,51 +72,53 @@ export default function InvestorDashboard() {
         ))}
       </div>
 
-      {/* UPCOMING DISTRIBUTIONS — US-I2.2.2 */}
-      <div style={s.distSection}>
-        <h2 style={s.sectionTitle}>Upcoming Distributions</h2>
-        <div style={s.distGrid}>
-          {investments.map((inv) => {
-            const days = getDaysSince(inv.invested_at);
-            const dailyAccrual = calculateAccruedYield(inv.principal, inv.target_apy, 1);
-            const nextPayout = inv.tranche === "senior"
-              ? "2026-07-01"  // Quarterly
-              : "2026-05-01"; // Monthly
-            const nextPayoutLabel = inv.tranche === "senior" ? "Quarterly" : "Monthly";
-            const estimatedPayout = inv.tranche === "senior"
-              ? calculateAccruedYield(inv.principal, inv.target_apy, 90)
-              : calculateAccruedYield(inv.principal, inv.target_apy, 30);
+      {/* UPCOMING DISTRIBUTIONS */}
+      {investments.length > 0 && (
+        <div style={s.distSection}>
+          <h2 style={s.sectionTitle}>Upcoming Distributions</h2>
+          <div style={s.distGrid}>
+            {investments.map((inv) => {
+              const days = getDaysSince(inv.invested_at);
+              const dailyAccrual = calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), 1);
+              const nextPayout = inv.tranche === "senior"
+                ? "2026-07-01"  // Quarterly
+                : "2026-05-01"; // Monthly
+              const nextPayoutLabel = inv.tranche === "senior" ? "Quarterly" : "Monthly";
+              const estimatedPayout = inv.tranche === "senior"
+                ? calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), 90)
+                : calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), 30);
 
-            return (
-              <div key={inv.id} style={{ ...s.distCard, borderLeft: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
-                <div style={s.distHeader}>
-                  <span style={{ fontSize: "20px" }}>{inv.tranche === "senior" ? "🛡️" : "⚡"}</span>
-                  <span style={s.distTrancheLabel}>{inv.tranche === "senior" ? "Senior Tranche" : "Junior Tranche"}</span>
-                  <span style={{ ...s.distFreq, color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>{nextPayoutLabel}</span>
+              return (
+                <div key={inv.id} style={{ ...s.distCard, borderLeft: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
+                  <div style={s.distHeader}>
+                    <span style={{ fontSize: "20px" }}>{inv.tranche === "senior" ? "🛡️" : "⚡"}</span>
+                    <span style={s.distTrancheLabel}>{inv.tranche === "senior" ? "Senior Tranche" : "Junior Tranche"}</span>
+                    <span style={{ ...s.distFreq, color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>{nextPayoutLabel}</span>
+                  </div>
+                  <div style={s.distDetails}>
+                    <div>
+                      <span style={s.distLabel}>Next Payout Date</span>
+                      <span style={s.distValue}>{new Date(nextPayout).toLocaleDateString("en-CA", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    </div>
+                    <div>
+                      <span style={s.distLabel}>Estimated Amount</span>
+                      <span style={{ ...s.distValue, color: "#10B981" }}>~{formatCAD(estimatedPayout)}</span>
+                    </div>
+                    <div>
+                      <span style={s.distLabel}>Today&apos;s Accrual</span>
+                      <span style={{ ...s.distValue, color: "#14B8A6" }}>+{formatCAD(dailyAccrual)}/day</span>
+                    </div>
+                    <div>
+                      <span style={s.distLabel}>Days Invested</span>
+                      <span style={s.distValue}>{days} days</span>
+                    </div>
+                  </div>
                 </div>
-                <div style={s.distDetails}>
-                  <div>
-                    <span style={s.distLabel}>Next Payout Date</span>
-                    <span style={s.distValue}>{new Date(nextPayout).toLocaleDateString("en-CA", { month: "short", day: "numeric", year: "numeric" })}</span>
-                  </div>
-                  <div>
-                    <span style={s.distLabel}>Estimated Amount</span>
-                    <span style={{ ...s.distValue, color: "#10B981" }}>~{formatCAD(estimatedPayout)}</span>
-                  </div>
-                  <div>
-                    <span style={s.distLabel}>Today&apos;s Accrual</span>
-                    <span style={{ ...s.distValue, color: "#14B8A6" }}>+{formatCAD(dailyAccrual)}/day</span>
-                  </div>
-                  <div>
-                    <span style={s.distLabel}>Days Invested</span>
-                    <span style={s.distValue}>{days} days</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Portfolio Growth Chart */}
       <div style={s.section}>
@@ -92,7 +126,7 @@ export default function InvestorDashboard() {
         <div style={s.chartCard}>
           <div style={s.chartArea}>
             {history.map((point, i) => {
-              const min = 74000; const max = 79000; const height = ((point.value - min) / (max - min)) * 100;
+              const height = chartRange > 0 ? ((point.value - chartMin) / chartRange) * 100 : 5;
               return (
                 <div key={point.date} style={s.chartCol}>
                   <div style={s.chartBarWrap}><div style={{ ...s.chartBar, height: `${height}%`, animationDelay: `${i * 0.1}s` }} /></div>
@@ -105,75 +139,88 @@ export default function InvestorDashboard() {
         </div>
       </div>
 
-      {/* Your Investments — with daily accrual indicator */}
-      <div style={s.section}>
-        <h2 style={s.sectionTitle}>Your Investments</h2>
-        <div style={s.trancheGrid}>
-          {investments.map((inv) => {
-            const days = getDaysSince(inv.invested_at);
-            const dailyAccrual = calculateAccruedYield(inv.principal, inv.target_apy, 1);
+      {/* Your Investments */}
+      {investments.length > 0 ? (
+        <div style={s.section}>
+          <h2 style={s.sectionTitle}>Your Investments</h2>
+          <div style={s.trancheGrid}>
+            {investments.map((inv) => {
+              const days = getDaysSince(inv.invested_at);
+              const dailyAccrual = calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), 1);
+              const principal = Number(inv.principal);
+              const accruedYield = Number(inv.accrued_yield) || 0;
 
-            return (
-              <div key={inv.id} style={{ ...s.trancheCard, borderTop: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
-                <div style={s.trancheHeader}>
-                  <span style={{ ...s.trancheBadge, background: inv.tranche === "senior" ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)", color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>
-                    {inv.tranche === "senior" ? "🛡️ Senior Tranche" : "⚡ Junior Tranche"}
-                  </span>
-                  <span style={{ fontSize: "18px", fontWeight: 800, color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>{inv.target_apy}% APY</span>
-                </div>
-                <div style={s.trancheDetails}>
-                  <div><span style={s.tLabel}>Principal</span><span style={s.tValue}>{formatCAD(inv.principal)}</span></div>
-                  <div><span style={s.tLabel}>Accrued Yield</span><span style={{ ...s.tValue, color: "#10B981" }}>+{formatCAD(inv.accrued_yield)}</span></div>
-                  <div><span style={s.tLabel}>Current Value</span><span style={s.tValue}>{formatCAD(inv.principal + inv.accrued_yield)}</span></div>
-                </div>
+              return (
+                <div key={inv.id} style={{ ...s.trancheCard, borderTop: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
+                  <div style={s.trancheHeader}>
+                    <span style={{ ...s.trancheBadge, background: inv.tranche === "senior" ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)", color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>
+                      {inv.tranche === "senior" ? "🛡️ Senior Tranche" : "⚡ Junior Tranche"}
+                    </span>
+                    <span style={{ fontSize: "18px", fontWeight: 800, color: inv.tranche === "senior" ? "#10B981" : "#F59E0B" }}>{inv.target_apy}% APY</span>
+                  </div>
+                  <div style={s.trancheDetails}>
+                    <div><span style={s.tLabel}>Principal</span><span style={s.tValue}>{formatCAD(principal)}</span></div>
+                    <div><span style={s.tLabel}>Accrued Yield</span><span style={{ ...s.tValue, color: "#10B981" }}>+{formatCAD(accruedYield)}</span></div>
+                    <div><span style={s.tLabel}>Current Value</span><span style={s.tValue}>{formatCAD(principal + accruedYield)}</span></div>
+                  </div>
 
-                {/* Daily Accrual Indicator — US-I2.2.2 */}
-                <div style={s.accrualRow}>
-                  <div style={s.accrualItem}>
-                    <span style={s.accrualIcon}>📊</span>
-                    <span style={s.accrualLabel}>Daily Accrual</span>
-                    <span style={{ ...s.accrualValue, color: "#14B8A6" }}>+{formatCAD(dailyAccrual)}/day</span>
+                  <div style={s.accrualRow}>
+                    <div style={s.accrualItem}>
+                      <span style={s.accrualIcon}>📊</span>
+                      <span style={s.accrualLabel}>Daily Accrual</span>
+                      <span style={{ ...s.accrualValue, color: "#14B8A6" }}>+{formatCAD(dailyAccrual)}/day</span>
+                    </div>
+                    <div style={s.accrualItem}>
+                      <span style={s.accrualIcon}>📅</span>
+                      <span style={s.accrualLabel}>Days Invested</span>
+                      <span style={s.accrualValue}>{days} days</span>
+                    </div>
+                    <div style={s.accrualItem}>
+                      <span style={s.accrualIcon}>🔒</span>
+                      <span style={s.accrualLabel}>Lock-up</span>
+                      <span style={s.accrualValue}>{inv.tranche === "senior" ? "90 days" : "180 days"}</span>
+                    </div>
                   </div>
-                  <div style={s.accrualItem}>
-                    <span style={s.accrualIcon}>📅</span>
-                    <span style={s.accrualLabel}>Days Invested</span>
-                    <span style={s.accrualValue}>{days} days</span>
-                  </div>
-                  <div style={s.accrualItem}>
-                    <span style={s.accrualIcon}>🔒</span>
-                    <span style={s.accrualLabel}>Lock-up</span>
-                    <span style={s.accrualValue}>{inv.tranche === "senior" ? "90 days" : "180 days"}</span>
-                  </div>
-                </div>
 
-                <div style={s.trancheFooter}>
-                  <span style={s.tDate}>Since {new Date(inv.invested_at).toLocaleDateString("en-CA", { month: "short", day: "numeric", year: "numeric" })}</span>
-                  <button style={s.withdrawBtn}>Withdraw</button>
+                  <div style={s.trancheFooter}>
+                    <span style={s.tDate}>Since {new Date(inv.invested_at).toLocaleDateString("en-CA", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    <button style={s.withdrawBtn}>Withdraw</button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={s.section}>
+          <h2 style={s.sectionTitle}>Your Investments</h2>
+          <div style={s.chartCard}>
+            <p style={{ color: "#9CA3AF" }}>You do not have any active investments.</p>
+          </div>
+        </div>
+      )}
 
       {/* Pool Health */}
       <div style={s.section}>
         <h2 style={s.sectionTitle}>Pool Health</h2>
         <div style={s.poolGrid}>
-          {pools.map((pool) => (
-            <div key={pool.id} style={s.poolCard}>
-              <div style={s.poolHeader}><span style={s.poolName}>{pool.tranche === "senior" ? "🛡️ Senior Pool" : "⚡ Junior Pool"}</span><span style={s.poolApy}>{pool.target_apy}% APY</span></div>
-              <div style={s.poolMeter}>
-                <div style={s.poolMeterHeader}><span>Utilization</span><span style={{ color: pool.utilization_ratio > 90 ? "#EF4444" : "#10B981", fontWeight: 700 }}>{pool.utilization_ratio}%</span></div>
-                <div style={s.poolTrack}><div style={{ height: "100%", borderRadius: "100px", width: `${pool.utilization_ratio}%`, background: pool.utilization_ratio > 90 ? "#EF4444" : pool.utilization_ratio > 75 ? "#F59E0B" : "#10B981", transition: "width 1s ease" }} /></div>
+          {pools.map((pool) => {
+            const utilization = Number(pool.utilization_ratio) || 0;
+            return (
+              <div key={pool.id} style={s.poolCard}>
+                <div style={s.poolHeader}><span style={s.poolName}>{pool.tranche === "senior" ? "🛡️ Senior Pool" : "⚡ Junior Pool"}</span><span style={s.poolApy}>{pool.target_apy}% APY</span></div>
+                <div style={s.poolMeter}>
+                  <div style={s.poolMeterHeader}><span>Utilization</span><span style={{ color: utilization > 90 ? "#EF4444" : "#10B981", fontWeight: 700 }}>{utilization}%</span></div>
+                  <div style={s.poolTrack}><div style={{ height: "100%", borderRadius: "100px", width: `${utilization}%`, background: utilization > 90 ? "#EF4444" : utilization > 75 ? "#F59E0B" : "#10B981", transition: "width 1s ease" }} /></div>
+                </div>
+                <div style={s.poolStats}>
+                  <div><span style={s.psLabel}>Total</span><span style={s.psValue}>{formatCAD(Number(pool.total_capital))}</span></div>
+                  <div><span style={s.psLabel}>Deployed</span><span style={s.psValue}>{formatCAD(Number(pool.deployed_capital))}</span></div>
+                  <div><span style={s.psLabel}>Available</span><span style={{ ...s.psValue, color: "#10B981" }}>{formatCAD(Number(pool.available_capital))}</span></div>
+                </div>
               </div>
-              <div style={s.poolStats}>
-                <div><span style={s.psLabel}>Total</span><span style={s.psValue}>{formatCAD(pool.total_capital)}</span></div>
-                <div><span style={s.psLabel}>Deployed</span><span style={s.psValue}>{formatCAD(pool.deployed_capital)}</span></div>
-                <div><span style={s.psLabel}>Available</span><span style={{ ...s.psValue, color: "#10B981" }}>{formatCAD(pool.available_capital)}</span></div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </DashboardLayout>

@@ -1,22 +1,28 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_STUDENT_STATS, MOCK_LOAN, MOCK_REPAYMENT_SCHEDULE } from "@/lib/mock-data";
+import { getProfile, getStudentStats, getStudentLoan, getRepaymentSchedule } from "@/lib/data-access";
 import { formatCAD, formatDate } from "@/lib/calculations";
 
-export default function StudentDashboard() {
-  const stats = MOCK_STUDENT_STATS;
-  const loan = MOCK_LOAN;
-  const schedule = MOCK_REPAYMENT_SCHEDULE;
+export default async function StudentDashboard() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const stats = await getStudentStats(profile.id);
+  const loan = await getStudentLoan(profile.id);
+  const schedule = loan ? await getRepaymentSchedule(loan.id) : [];
+
+  const firstName = profile.full_name?.split(" ")[0] || "Student";
 
   return (
-    <DashboardLayout role="student" userName="Amara Okafor">
+    <DashboardLayout role="student" userName={profile.full_name || "Student"}>
       {/* Welcome Banner */}
       <div style={s.banner}>
         <img src="/images/student-studying.png" alt="Student studying" style={s.bannerImg} />
         <div style={s.bannerOverlay} />
         <div style={s.bannerContent}>
-          <h1 style={s.bannerTitle}>Welcome back, Amara 👋</h1>
+          <h1 style={s.bannerTitle}>Welcome back, {firstName}</h1>
           <p style={s.bannerSub}>Here&apos;s your tuition financing overview.</p>
         </div>
         <a href="/student/apply" style={s.applyBtn}>+ New Application</a>
@@ -25,10 +31,10 @@ export default function StudentDashboard() {
       {/* Stats */}
       <div style={s.statsGrid}>
         {[
-          { label: "Total Borrowed", value: formatCAD(stats.total_borrowed), icon: "🎓", color: "#10B981" },
-          { label: "Total Paid", value: formatCAD(stats.total_paid), icon: "✅", color: "#10B981" },
-          { label: "Remaining Balance", value: formatCAD(stats.remaining_balance), icon: "📊", color: "#F59E0B" },
-          { label: "Next Payment", value: formatCAD(stats.next_payment_amount), sub: `Due: ${formatDate(stats.next_payment_date)}`, icon: "📅", color: "#7C3AED" },
+          { label: "Total Borrowed", value: formatCAD(stats?.total_borrowed || 0), icon: "🎓", color: "#10B981" },
+          { label: "Total Paid", value: formatCAD(stats?.total_paid || 0), icon: "✅", color: "#10B981" },
+          { label: "Remaining Balance", value: formatCAD(stats?.remaining_balance || 0), icon: "📊", color: "#F59E0B" },
+          { label: "Next Payment", value: formatCAD(stats?.next_payment_amount || 0), sub: `Due: ${stats?.next_payment_date ? formatDate(stats.next_payment_date) : "N/A"}`, icon: "📅", color: "#7C3AED" },
         ].map((stat) => (
           <div key={stat.label} style={s.statCard}>
             <div style={s.statHeader}><span style={{ ...s.statIconBg, background: `${stat.color}10`, color: stat.color }}>{stat.icon}</span><span style={s.statLabel}>{stat.label}</span></div>
@@ -39,64 +45,76 @@ export default function StudentDashboard() {
       </div>
 
       {/* Active Loan Card */}
-      <div style={s.section}>
-        <h2 style={s.sectionTitle}>Active Loan</h2>
-        <div style={s.loanCard}>
-          <div style={s.loanHeader}>
-            <div>
-              <div style={s.loanUni}>{loan.university_name}</div>
-              <div style={s.loanId}>Loan #{loan.id} · Student ID: {loan.student_id_number}</div>
+      {loan ? (
+        <div style={s.section}>
+          <h2 style={s.sectionTitle}>Active Loan</h2>
+          <div style={s.loanCard}>
+            <div style={s.loanHeader}>
+              <div>
+                <div style={s.loanUni}>{loan.university?.name || "Unknown University"}</div>
+                <div style={s.loanId}>Loan #{loan.id.substring(0,8)} · Student ID: {loan.student_id_number}</div>
+              </div>
+              <span style={s.statusBadge}>● {loan.status.replace("_", " ").toUpperCase()}</span>
             </div>
-            <span style={s.statusBadge}>● {loan.status.replace("_", " ").toUpperCase()}</span>
-          </div>
-          <div style={s.loanDetails}>
-            {[
-              { l: "Loan Amount", v: formatCAD(loan.loan_amount) },
-              { l: "APR", v: `${loan.apr}%` },
-              { l: "Term", v: `${loan.term_months} months` },
-              { l: "Monthly Payment", v: formatCAD(loan.monthly_payment) },
-              { l: "Total Cost", v: formatCAD(loan.total_cost) },
-            ].map((d) => (
-              <div key={d.l} style={s.loanDetail}><span style={s.detailLabel}>{d.l}</span><span style={s.detailValue}>{d.v}</span></div>
-            ))}
-          </div>
-          <div style={s.progressSection}>
-            <div style={s.progressHeader}><span>Repayment Progress</span><span style={s.progressPct}>{((stats.total_paid / stats.total_borrowed) * 100).toFixed(1)}%</span></div>
-            <div style={s.progressTrack}><div style={{ ...s.progressBar, width: `${(stats.total_paid / stats.total_borrowed) * 100}%` }} /></div>
+            <div style={s.loanDetails}>
+              {[
+                { l: "Loan Amount", v: formatCAD(loan.loan_amount) },
+                { l: "APR", v: `${loan.apr}%` },
+                { l: "Term", v: `${loan.term_months} months` },
+                { l: "Monthly Payment", v: formatCAD(loan.monthly_payment) },
+                { l: "Total Cost", v: formatCAD(loan.total_cost) },
+              ].map((d) => (
+                <div key={d.l} style={s.loanDetail}><span style={s.detailLabel}>{d.l}</span><span style={s.detailValue}>{d.v}</span></div>
+              ))}
+            </div>
+            {stats && stats.total_borrowed > 0 && (
+              <div style={s.progressSection}>
+                <div style={s.progressHeader}><span>Repayment Progress</span><span style={s.progressPct}>{((stats.total_paid / stats.total_borrowed) * 100).toFixed(1)}%</span></div>
+                <div style={s.progressTrack}><div style={{ ...s.progressBar, width: `${(stats.total_paid / stats.total_borrowed) * 100}%` }} /></div>
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      ) : (
+        <div style={s.section}>
+          <h2 style={s.sectionTitle}>Active Loan</h2>
+          <div style={s.loanCard}>
+            <p style={{ color: "#9CA3AF" }}>You do not have an active loan application.</p>
+          </div>
+        </div>
+      )}
 
       {/* Schedule Table */}
-      <div style={s.section}>
-        <h2 style={s.sectionTitle}>Payment Schedule</h2>
-        <div style={s.tableCard}>
-          <table style={s.table}>
-            <thead><tr>
-              {["#", "Due Date", "Principal", "Interest", "Total", "Balance", "Status"].map((h) => (
-                <th key={h} style={s.th}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {schedule.map((row) => (
-                <tr key={row.id}>
-                  <td style={s.td}>{row.payment_number}</td>
-                  <td style={s.td}>{formatDate(row.due_date)}</td>
-                  <td style={s.td}>{formatCAD(row.principal)}</td>
-                  <td style={s.td}>{formatCAD(row.interest)}</td>
-                  <td style={{ ...s.td, fontWeight: 600 }}>{formatCAD(row.total_payment)}</td>
-                  <td style={s.td}>{formatCAD(row.remaining_balance)}</td>
-                  <td style={s.td}>
-                    <span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 600, background: row.status === "completed" ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)", color: row.status === "completed" ? "#10B981" : "#F59E0B" }}>
-                      {row.status === "completed" ? "✓ Paid" : "Upcoming"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {schedule.length > 0 && (
+        <div style={s.section}>
+          <h2 style={s.sectionTitle}>Payment Schedule</h2>
+          <div style={s.tableCard}>
+            <table style={s.table}>
+              <thead><tr>
+                {["#", "Due Date", "Principal", "Interest", "Total", "Status"].map((h) => (
+                  <th key={h} style={s.th}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {schedule.map((row) => (
+                  <tr key={row.id}>
+                    <td style={s.td}>{row.payment_number}</td>
+                    <td style={s.td}>{formatDate(row.due_date)}</td>
+                    <td style={s.td}>{formatCAD(row.principal)}</td>
+                    <td style={s.td}>{formatCAD(row.interest)}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{formatCAD(row.total_payment)}</td>
+                    <td style={s.td}>
+                      <span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 600, background: row.status === "completed" ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)", color: row.status === "completed" ? "#10B981" : "#F59E0B" }}>
+                        {row.status === "completed" ? "✓ Paid" : "Upcoming"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </DashboardLayout>
   );
 }

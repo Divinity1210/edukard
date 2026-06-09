@@ -1,17 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { signup } from "./actions";
 
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultRole = searchParams.get("role") || "student";
   const [role, setRole] = useState<"student" | "investor">(defaultRole as "student" | "investor");
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [agreed, setAgreed] = useState(false); const [loading, setLoading] = useState(false);
+  const [name, setName] = useState(""); 
+  const [email, setEmail] = useState(""); 
+  const [password, setPassword] = useState("");
+  const [agreed, setAgreed] = useState(false); 
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const handleSignup = (e: React.FormEvent) => { e.preventDefault(); setLoading(true); setTimeout(() => { router.push(role === "investor" ? "/investor/dashboard" : "/student/dashboard"); }, 800); };
+  const handleSignup = (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    setError(null);
+    startTransition(async () => { 
+      const formData = new FormData();
+      formData.append("email", email);
+      formData.append("password", password);
+      formData.append("name", name);
+      formData.append("role", role);
+      
+      const result = await signup(formData);
+      if (result?.error) {
+        setError(result.error);
+      }
+    }); 
+  };
 
   return (
     <div style={s.page}>
@@ -26,11 +47,12 @@ function SignupForm() {
             <button style={{ ...s.roleBtn, ...(role === "investor" ? s.roleBtnActiveInv : {}) }} onClick={() => setRole("investor")} type="button">📈 I&apos;m an Investor</button>
           </div>
           <form onSubmit={handleSignup} style={s.form}>
+            {error && <div style={s.errorMessage}>{error}</div>}
             <div style={s.field}><label style={s.label}>Full legal name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="As shown on your ID" style={s.input} required /></div>
             <div style={s.field}><label style={s.label}>Email address</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={role === "student" ? "you@university.ca" : "you@company.ca"} style={s.input} required /></div>
-            <div style={s.field}><label style={s.label}>Create password</label><input type="password" placeholder="Min. 8 characters" style={s.input} required minLength={8} /></div>
+            <div style={s.field}><label style={s.label}>Create password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min. 8 characters" style={s.input} required minLength={8} /></div>
             <label style={s.consent}><input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} style={s.checkbox} /><span style={s.consentText}>I consent to EduKard collecting my personal information per the <a href="/privacy" style={s.link}>Privacy Policy</a> and PIPEDA.</span></label>
-            <button type="submit" style={{ ...s.submitBtn, opacity: agreed ? 1 : 0.5 }} disabled={loading || !agreed}>{loading ? <span style={s.spinner} /> : `Create ${role === "student" ? "Student" : "Investor"} Account`}</button>
+            <button type="submit" style={{ ...s.submitBtn, opacity: agreed && !isPending ? 1 : 0.5 }} disabled={isPending || !agreed}>{isPending ? <span style={s.spinner} /> : `Create ${role === "student" ? "Student" : "Investor"} Account`}</button>
           </form>
           <p style={s.footerText}>Already have an account? <a href="/login" style={s.link}>Sign in</a></p>
         </div>
@@ -68,4 +90,5 @@ const s: Record<string, React.CSSProperties> = {
   submitBtn: { padding: "14px", borderRadius: "12px", background: "linear-gradient(135deg, #10B981, #059669)", color: "#fff", fontSize: "16px", fontWeight: 600, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 20px rgba(16,185,129,0.2)" },
   spinner: { width: "20px", height: "20px", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.6s linear infinite" },
   footerText: { textAlign: "center" as const, fontSize: "14px", color: "#6B7280", marginTop: "24px" },
+  errorMessage: { padding: "10px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#EF4444", fontSize: "13px", textAlign: "center" as const }
 };

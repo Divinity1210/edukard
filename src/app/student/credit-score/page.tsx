@@ -1,28 +1,45 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_CREDIT_ASSESSMENT } from "@/lib/mock-data";
+import { getProfile, getCreditAssessment } from "@/lib/data-access";
 import { formatCAD, formatPercent } from "@/lib/calculations";
 
-export default function CreditScorePage() {
-  const credit = MOCK_CREDIT_ASSESSMENT;
-  const score = credit.edukard_score;
+export const dynamic = "force-dynamic";
+
+export default async function CreditScorePage() {
+  const profile = await getProfile();
+  const credit = profile ? await getCreditAssessment(profile.id) : null;
+  const userName = profile?.full_name || "Student";
+
+  if (!credit) {
+    return (
+      <DashboardLayout role="student" userName={userName}>
+        <h1 style={s.title}>Your EduKard Score</h1>
+        <p style={s.subtitle}>Your creditworthiness assessed without a traditional credit bureau report.</p>
+        <div style={s.detailCard}>
+          <h3 style={s.detailTitle}>No assessment yet</h3>
+          <p style={s.detailDesc}>Connect your payroll and submit an application to generate your EduKard Score. <a href="/student/apply" style={{ color: "#10B981" }}>Start an application →</a></p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const score = Number(credit.edukard_score);
+  const monthlyIncome = Number(credit.monthly_income);
+  const dti = Number(credit.dti_ratio);
+  const employmentMonths = Number(credit.employment_months);
   const riskLabel = credit.risk_flag === "green" ? "Low Risk" : credit.risk_flag === "yellow" ? "Medium Risk" : "High Risk";
   const riskColor = credit.risk_flag === "green" ? "#10B981" : credit.risk_flag === "yellow" ? "#F59E0B" : "#EF4444";
   const riskBg = credit.risk_flag === "green" ? "rgba(16,185,129,0.12)" : credit.risk_flag === "yellow" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)";
 
-  // Score gauge angle (0-100 maps to 0-270 degrees)
   const angle = (score / 100) * 270;
   const circumference = 2 * Math.PI * 90;
   const dashOffset = circumference - (angle / 360) * circumference;
 
   return (
-    <DashboardLayout role="student" userName="Amara Okafor">
+    <DashboardLayout role="student" userName={userName}>
       <h1 style={s.title}>Your EduKard Score</h1>
       <p style={s.subtitle}>Your creditworthiness assessed without a traditional credit bureau report.</p>
 
       <div style={s.topGrid}>
-        {/* Score Gauge */}
         <div style={s.gaugeCard}>
           <div style={s.gaugeWrap}>
             <svg width="220" height="220" viewBox="0 0 220 220" style={{ transform: "rotate(-135deg)" }}>
@@ -38,11 +55,10 @@ export default function CreditScorePage() {
           <p style={s.gaugeDesc}>EduKard uses payroll data, employment stability, and income-to-debt metrics to assess your eligibility — no traditional credit score required.</p>
         </div>
 
-        {/* Details */}
         <div style={s.detailsCol}>
           <div style={s.detailCard}>
             <h3 style={s.detailTitle}>Approved Borrowing Limit</h3>
-            <div style={s.approvedAmount}>{formatCAD(credit.approved_limit)}</div>
+            <div style={s.approvedAmount}>{formatCAD(Number(credit.approved_limit))}</div>
             <p style={s.detailDesc}>Maximum tuition financing available based on your verified income and risk profile.</p>
           </div>
 
@@ -50,9 +66,9 @@ export default function CreditScorePage() {
             <h3 style={s.detailTitle}>Score Breakdown</h3>
             <div style={s.metricsList}>
               {[
-                { label: "Monthly Net Income", value: formatCAD(credit.monthly_income), icon: "💰" },
-                { label: "Debt-to-Income Ratio", value: formatPercent(credit.dti_ratio), icon: "📊", color: credit.dti_ratio < 30 ? "#10B981" : credit.dti_ratio < 40 ? "#F59E0B" : "#EF4444" },
-                { label: "Employment Duration", value: `${credit.employment_months} months`, icon: "💼" },
+                { label: "Monthly Net Income", value: formatCAD(monthlyIncome), icon: "💰" },
+                { label: "Debt-to-Income Ratio", value: formatPercent(dti), icon: "📊", color: dti < 30 ? "#10B981" : dti < 40 ? "#F59E0B" : "#EF4444" },
+                { label: "Employment Duration", value: `${employmentMonths} months`, icon: "💼" },
                 { label: "Risk Classification", value: riskLabel, icon: "🛡️", color: riskColor },
               ].map((m) => (
                 <div key={m.label} style={s.metricRow}>
@@ -66,14 +82,13 @@ export default function CreditScorePage() {
         </div>
       </div>
 
-      {/* Factors */}
       <div style={s.section}>
         <h2 style={s.sectionTitle}>Scoring Factors</h2>
         <div style={s.factorsGrid}>
           {[
-            { title: "Income Stability", score: Math.min(30, Math.round((credit.employment_months / 12) * 10)), max: 30, desc: "Based on length of continuous employment", icon: "📈" },
-            { title: "Affordability", score: credit.dti_ratio < 20 ? 40 : credit.dti_ratio < 30 ? 30 : credit.dti_ratio < 40 ? 20 : 10, max: 40, desc: "Your debt-to-income ratio capacity", icon: "💳" },
-            { title: "Income Level", score: Math.min(30, Math.round((credit.monthly_income / 5000) * 30)), max: 30, desc: "Monthly income relative to loan amount", icon: "💰" },
+            { title: "Income Stability", score: Math.min(30, Math.round((employmentMonths / 12) * 10)), max: 30, desc: "Based on length of continuous employment", icon: "📈" },
+            { title: "Affordability", score: dti < 20 ? 40 : dti < 30 ? 30 : dti < 40 ? 20 : 10, max: 40, desc: "Your debt-to-income ratio capacity", icon: "💳" },
+            { title: "Income Level", score: Math.min(30, Math.round((monthlyIncome / 5000) * 30)), max: 30, desc: "Monthly income relative to loan amount", icon: "💰" },
           ].map((f) => (
             <div key={f.title} style={s.factorCard}>
               <div style={s.factorHeader}>
@@ -90,7 +105,6 @@ export default function CreditScorePage() {
         </div>
       </div>
 
-      {/* Adverse action if denied */}
       {credit.denial_reason && (
         <div style={s.adverseCard}>
           <div style={s.adverseIcon}>⚠️</div>
