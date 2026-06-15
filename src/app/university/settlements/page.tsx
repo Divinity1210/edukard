@@ -1,14 +1,21 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_UNIVERSITY_SETTLEMENTS } from "@/lib/mock-data";
+import { getProfile, getUniversityContext, getUniversitySettlements } from "@/lib/data-access";
 import { formatCAD } from "@/lib/calculations";
 
-export default function UniversitySettlementsPage() {
-  const settlements = MOCK_UNIVERSITY_SETTLEMENTS;
+export default async function UniversitySettlementsPage() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const uni = await getUniversityContext();
+  if (!uni) return <div>No university context</div>;
+
+  const settlements = await getUniversitySettlements(uni.id);
 
   return (
-    <DashboardLayout role="university" userName="UofT Bursar">
+    <DashboardLayout role="university" userName={profile.full_name || "University Admin"}>
       <div style={s.header}>
         <div><h1 style={s.title}>Incoming Settlements</h1><p style={s.subtitle}>Track batch wire transfers and crypto settlements.</p></div>
       </div>
@@ -28,7 +35,7 @@ export default function UniversitySettlementsPage() {
             {settlements.map((set) => (
               <tr key={set.id}>
                 <td style={s.td}>{new Date(set.date).toLocaleDateString()}</td>
-                <td style={{ ...s.td, fontWeight: 700, color: "#10B981" }}>{formatCAD(set.amount)} {set.currency}</td>
+                <td style={{ ...s.td, fontWeight: 700, color: "#10B981" }}>{formatCAD(Number(set.amount))} {set.currency}</td>
                 <td style={s.td}>{set.student_count} students</td>
                 <td style={s.td}><code style={s.code}>{set.transaction_hash || "Pending..."}</code></td>
                 <td style={s.td}>
@@ -42,6 +49,9 @@ export default function UniversitySettlementsPage() {
                 </td>
               </tr>
             ))}
+            {settlements.length === 0 && (
+              <tr><td colSpan={5} style={{...s.td, textAlign: "center"}}>No settlements found</td></tr>
+            )}
           </tbody>
         </table>
       </div>

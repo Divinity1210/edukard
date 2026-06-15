@@ -1,19 +1,32 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_ADMIN_STATS, MOCK_PENDING_APPLICATIONS, MOCK_APPLICANT_NAMES, MOCK_POOLS, MOCK_DELINQUENT_ACCOUNTS } from "@/lib/mock-data";
 import { formatCAD, formatPercent } from "@/lib/calculations";
+import { getProfile, getAdminStats, getAdminPendingLoans, getAdminDelinquentLoans } from "@/lib/data-access";
 
-export default function AdminDashboard() {
-  const stats = MOCK_ADMIN_STATS;
-  const pending = MOCK_PENDING_APPLICATIONS;
-  const pools = MOCK_POOLS;
-  const delinquent = MOCK_DELINQUENT_ACCOUNTS;
+export default async function AdminDashboard() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const stats = await getAdminStats();
+  const pendingLoans = await getAdminPendingLoans();
+  const delinquentLoans = await getAdminDelinquentLoans();
+
+  const pending = pendingLoans.slice(0, 5);
+  const delinquent = delinquentLoans.slice(0, 4);
+
   const riskColors: Record<string, string> = { green: "#10B981", yellow: "#F59E0B", red: "#EF4444" };
   const riskBg: Record<string, string> = { green: "rgba(16,185,129,0.12)", yellow: "rgba(245,158,11,0.12)", red: "rgba(239,68,68,0.12)" };
 
+  // Calculate random risk for mock display since it's not in DB schema directly yet
+  const getRisk = (id: string) => {
+    const r = id.charCodeAt(id.length - 1) % 3;
+    return r === 0 ? "green" : r === 1 ? "yellow" : "red";
+  };
+
   return (
-    <DashboardLayout role="admin" userName="Admin User">
+    <DashboardLayout role="admin" userName={profile.full_name || "Admin User"}>
       <h1 style={s.title}>Operations Dashboard</h1>
       <p style={s.subtitle}>Real-time overview of the EduKard protocol.</p>
 
@@ -39,16 +52,22 @@ export default function AdminDashboard() {
           <table style={s.table}>
             <thead><tr>{["Applicant", "University", "Amount", "Risk", "Status", "Actions"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
             <tbody>
-              {pending.map((app) => (
-                <tr key={app.id}>
-                  <td style={{ ...s.td, fontWeight: 600, color: "#F9FAFB" }}>{MOCK_APPLICANT_NAMES[app.user_id] || "Unknown"}</td>
-                  <td style={s.td}>{app.university_name}</td>
-                  <td style={{ ...s.td, fontWeight: 600 }}>{formatCAD(app.loan_amount)}</td>
-                  <td style={s.td}><span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: riskBg[app.risk_flag], color: riskColors[app.risk_flag] }}>{app.risk_flag === "green" ? "● Low" : app.risk_flag === "yellow" ? "● Medium" : "● High"}</span></td>
-                  <td style={s.td}><span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 600, background: "rgba(16,185,129,0.12)", color: "#10B981", textTransform: "capitalize" as const }}>{app.status.replace("_", " ")}</span></td>
-                  <td style={s.td}><div style={s.actionBtns}><button style={s.approveBtn}>Approve</button><button style={s.rejectBtn}>Reject</button></div></td>
-                </tr>
-              ))}
+              {pending.map((app) => {
+                const risk = getRisk(app.id);
+                return (
+                  <tr key={app.id}>
+                    <td style={{ ...s.td, fontWeight: 600, color: "#F9FAFB" }}>{app.profiles?.full_name || "Unknown"}</td>
+                    <td style={s.td}>{app.university_id || "Unspecified"}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{formatCAD(Number(app.loan_amount))}</td>
+                    <td style={s.td}><span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: riskBg[risk], color: riskColors[risk] }}>{risk === "green" ? "● Low" : risk === "yellow" ? "● Medium" : "● High"}</span></td>
+                    <td style={s.td}><span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 600, background: "rgba(16,185,129,0.12)", color: "#10B981", textTransform: "capitalize" as const }}>{app.status.replace("_", " ")}</span></td>
+                    <td style={s.td}><div style={s.actionBtns}><button style={s.approveBtn}>Approve</button><button style={s.rejectBtn}>Reject</button></div></td>
+                  </tr>
+                );
+              })}
+              {pending.length === 0 && (
+                <tr><td colSpan={6} style={{...s.td, textAlign: "center"}}>No pending applications</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -58,19 +77,26 @@ export default function AdminDashboard() {
         <div style={s.sectionHeader}><h2 style={s.sectionTitle}>⚠️ Delinquent Accounts</h2><a href="/admin/collections" style={s.viewAll}>View all →</a></div>
         <div style={s.dqGrid}>
           {delinquent.map((acc) => {
-            const statusColors: Record<string, string> = { "1_30_late": "#F59E0B", "31_60_late": "#f97316", "61_90_late": "#EF4444", "default": "#EF4444" };
-            const statusLabels: Record<string, string> = { "1_30_late": "1-30 Days Late", "31_60_late": "31-60 Days Late", "61_90_late": "61-90 Days Late", "default": "DEFAULT" };
+            const statusColor = acc.status === "defaulted" ? "#EF4444" : "#F59E0B";
             return (
-              <div key={acc.loan_id} style={{ ...s.dqCard, borderLeft: `4px solid ${statusColors[acc.status]}` }}>
-                <div style={s.dqHeader}><span style={s.dqName}>{acc.borrower}</span><span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: 700, color: statusColors[acc.status], background: `${statusColors[acc.status]}10`, textTransform: "uppercase" as const }}>{statusLabels[acc.status]}</span></div>
+              <div key={acc.id} style={{ ...s.dqCard, borderLeft: `4px solid ${statusColor}` }}>
+                <div style={s.dqHeader}>
+                  <span style={s.dqName}>{acc.profiles?.full_name || "Unknown"}</span>
+                  <span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: 700, color: statusColor, background: `${statusColor}10`, textTransform: "uppercase" as const }}>
+                    {acc.status}
+                  </span>
+                </div>
                 <div style={s.dqDetails}>
-                  <div><span style={s.dqLabel}>University</span><span style={s.dqValue}>{acc.university}</span></div>
-                  <div><span style={s.dqLabel}>Overdue</span><span style={{ ...s.dqValue, color: statusColors[acc.status] }}>{formatCAD(acc.amount_overdue)}</span></div>
-                  <div><span style={s.dqLabel}>Days Late</span><span style={s.dqValue}>{acc.days_late}</span></div>
+                  <div><span style={s.dqLabel}>University</span><span style={s.dqValue}>Unspecified</span></div>
+                  <div><span style={s.dqLabel}>Overdue</span><span style={{ ...s.dqValue, color: statusColor }}>{formatCAD(Number(acc.loan_amount))}</span></div>
+                  <div><span style={s.dqLabel}>Days Late</span><span style={s.dqValue}>30+</span></div>
                 </div>
               </div>
             );
           })}
+          {delinquent.length === 0 && (
+            <div style={{...s.dqCard, gridColumn: "1 / -1", textAlign: "center", color: "#6B7280"}}>No delinquent accounts</div>
+          )}
         </div>
       </div>
     </DashboardLayout>

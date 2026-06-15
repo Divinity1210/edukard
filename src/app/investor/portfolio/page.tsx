@@ -1,24 +1,51 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_INVESTMENTS, MOCK_PORTFOLIO_HISTORY } from "@/lib/mock-data";
-import { formatCAD } from "@/lib/calculations";
+import { getProfile, getInvestments } from "@/lib/data-access";
+import { formatCAD, calculateAccruedYield } from "@/lib/calculations";
 
-export default function PortfolioPage() {
-  const investments = MOCK_INVESTMENTS;
-  const history = MOCK_PORTFOLIO_HISTORY;
+export const dynamic = "force-dynamic";
 
-  const allTransactions = [
-    { date: "Apr 1, 2026", type: "Yield Distribution", amount: 341.10, tranche: "Senior" },
-    { date: "Apr 1, 2026", type: "Yield Distribution", amount: 291.78, tranche: "Junior" },
-    { date: "Mar 1, 2026", type: "Yield Distribution", amount: 333.33, tranche: "Senior" },
-    { date: "Mar 1, 2026", type: "Yield Distribution", amount: 287.67, tranche: "Junior" },
-    { date: "Jan 20, 2026", type: "Investment", amount: 25000, tranche: "Junior" },
-    { date: "Jan 15, 2026", type: "Investment", amount: 50000, tranche: "Senior" },
-  ];
+export default async function PortfolioPage() {
+  const profile = await getProfile();
+
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const investments = await getInvestments(profile.id);
+
+  // Portfolio growth derived from real holdings (principal + accrued yield at
+  // each month-end). Replace with a snapshot cron later for exact point-in-time.
+  const history = Array.from({ length: 6 }).map((_, idx) => {
+    const snapshot = new Date();
+    snapshot.setMonth(snapshot.getMonth() - (5 - idx));
+    const snapMs = snapshot.getTime();
+    const value = investments.reduce((sum, inv) => {
+      const investedMs = new Date(inv.invested_at).getTime();
+      if (investedMs > snapMs) return sum;
+      const days = Math.max(0, Math.floor((snapMs - investedMs) / 86400000));
+      return sum + Number(inv.principal) + calculateAccruedYield(Number(inv.principal), Number(inv.target_apy), days);
+    }, 0);
+    return { date: snapshot.toLocaleDateString("en-CA", { month: "short" }), value };
+  });
+  const histValues = history.map((h) => h.value);
+  const chartMin = Math.min(...histValues) * 0.98;
+  const chartMax = Math.max(...histValues) * 1.02;
+  const chartRange = chartMax - chartMin;
+
+  // Transaction history derived from real investments (a full ledger of yield
+  // distributions/withdrawals can be added as those events are recorded).
+  const allTransactions = investments
+    .map((inv) => ({
+      date: new Date(inv.invested_at).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }),
+      type: "Investment",
+      amount: Number(inv.principal),
+      tranche: inv.tranche === "senior" ? "Senior" : "Junior",
+      ts: new Date(inv.invested_at).getTime(),
+    }))
+    .sort((a, b) => b.ts - a.ts);
 
   return (
-    <DashboardLayout role="investor" userName="Marcus Chen">
+    <DashboardLayout role="investor" userName={profile.full_name || "Investor"}>
       <h1 style={s.title}>Portfolio Details</h1>
       <p style={s.subtitle}>Detailed view of your investment allocations and transaction history.</p>
 
@@ -27,8 +54,7 @@ export default function PortfolioPage() {
         <h2 style={s.cardTitle}>Portfolio Growth</h2>
         <div style={s.chartArea}>
           {history.map((p, i) => {
-            const min = 74000; const max = 79000;
-            const h = ((p.value - min) / (max - min)) * 100;
+            const h = chartRange > 0 ? ((p.value - chartMin) / chartRange) * 100 : 5;
             return (
               <div key={p.date} style={s.chartCol}>
                 <div style={s.chartBarWrap}><div style={{ ...s.chartBar, height: `${h}%`, animationDelay: `${i * 0.1}s` }} /></div>
@@ -43,18 +69,28 @@ export default function PortfolioPage() {
       {/* Holdings */}
       <div style={s.section}>
         <h2 style={s.cardTitle}>Current Holdings</h2>
-        <div style={s.holdingsGrid}>
-          {investments.map((inv) => (
-            <div key={inv.id} style={{ ...s.holdingCard, borderTop: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
-              <div style={s.holdingHeader}><span style={s.holdingBadge}>{inv.tranche === "senior" ? "🛡️ Senior" : "⚡ Junior"}</span><span style={{ color: inv.tranche === "senior" ? "#10B981" : "#F59E0B", fontWeight: 800, fontSize: "18px" }}>{inv.target_apy}% APY</span></div>
-              <div style={s.holdingDetails}>
-                <div><span style={s.hdLabel}>Principal</span><span style={s.hdValue}>{formatCAD(inv.principal)}</span></div>
-                <div><span style={s.hdLabel}>Yield</span><span style={{ ...s.hdValue, color: "#10B981" }}>+{formatCAD(inv.accrued_yield)}</span></div>
-                <div><span style={s.hdLabel}>Total</span><span style={s.hdValue}>{formatCAD(inv.principal + inv.accrued_yield)}</span></div>
-              </div>
-            </div>
-          ))}
-        </div>
+        {investments.length > 0 ? (
+          <div style={s.holdingsGrid}>
+            {investments.map((inv) => {
+              const principal = Number(inv.principal);
+              const accruedYield = Number(inv.accrued_yield) || 0;
+              return (
+                <div key={inv.id} style={{ ...s.holdingCard, borderTop: `4px solid ${inv.tranche === "senior" ? "#10B981" : "#F59E0B"}` }}>
+                  <div style={s.holdingHeader}><span style={s.holdingBadge}>{inv.tranche === "senior" ? "🛡️ Senior" : "⚡ Junior"}</span><span style={{ color: inv.tranche === "senior" ? "#10B981" : "#F59E0B", fontWeight: 800, fontSize: "18px" }}>{inv.target_apy}% APY</span></div>
+                  <div style={s.holdingDetails}>
+                    <div><span style={s.hdLabel}>Principal</span><span style={s.hdValue}>{formatCAD(principal)}</span></div>
+                    <div><span style={s.hdLabel}>Yield</span><span style={{ ...s.hdValue, color: "#10B981" }}>+{formatCAD(accruedYield)}</span></div>
+                    <div><span style={s.hdLabel}>Total</span><span style={s.hdValue}>{formatCAD(principal + accruedYield)}</span></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={s.holdingCard}>
+            <p style={{ color: "#9CA3AF" }}>You do not have any current holdings.</p>
+          </div>
+        )}
       </div>
 
       {/* Transactions */}

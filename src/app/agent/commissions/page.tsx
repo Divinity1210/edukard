@@ -1,19 +1,30 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_AGENT_REFERRALS } from "@/lib/mock-data";
 import { formatCAD } from "@/lib/calculations";
+import { getProfile, getAgentProfile, getAgentReferrals } from "@/lib/data-access";
 
-export default function AgentCommissionsPage() {
-  const referrals = MOCK_AGENT_REFERRALS.filter(r => r.commission_earned > 0);
-  const totalPaid = referrals.filter(r => r.commission_status === "paid").reduce((sum, r) => sum + r.commission_earned, 0);
-  const totalPending = referrals.filter(r => r.commission_status === "pending").reduce((sum, r) => sum + r.commission_earned, 0);
+export default async function AgentCommissionsPage() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  const agentProfile = await getAgentProfile(profile.id);
+  
+  if (!agentProfile) {
+    return <div>No agent profile found.</div>;
+  }
+
+  const allReferrals = await getAgentReferrals(agentProfile.id);
+  const referrals = allReferrals.filter(r => Number(r.commission_earned) > 0);
+  const totalPaid = referrals.filter(r => r.commission_status === "paid").reduce((sum, r) => sum + Number(r.commission_earned), 0);
+  const totalPending = referrals.filter(r => r.commission_status === "pending").reduce((sum, r) => sum + Number(r.commission_earned), 0);
 
   return (
-    <DashboardLayout role="agent" userName="Global Ed Partners">
+    <DashboardLayout role="agent" userName={profile.full_name || "Agent"}>
       <div style={s.header}>
         <div><h1 style={s.title}>Commissions & Payouts</h1><p style={s.subtitle}>Track your referral earnings and payout history.</p></div>
-        <button style={s.withdrawBtn} disabled={totalPending === 0}>
+        <button style={{...s.withdrawBtn, opacity: totalPending === 0 ? 0.5 : 1}} disabled={totalPending === 0}>
           Request Payout ({formatCAD(totalPending)})
         </button>
       </div>
@@ -29,7 +40,7 @@ export default function AgentCommissionsPage() {
         </div>
         <div style={s.statCard}>
           <div style={s.statLabel}>Next Payout Date</div>
-          <div style={{ ...s.statValue, color: "#F59E0B" }}>May 1, 2026</div>
+          <div style={{ ...s.statValue, color: "#F59E0B" }}>First of next month</div>
         </div>
       </div>
 
@@ -48,7 +59,7 @@ export default function AgentCommissionsPage() {
               <tr key={ref.id}>
                 <td style={{ ...s.td, fontWeight: 600 }}>{ref.student_name}</td>
                 <td style={s.td}>{new Date(ref.referred_at).toLocaleDateString()}</td>
-                <td style={{ ...s.td, fontWeight: 700, color: "#EC4899" }}>{formatCAD(ref.commission_earned)}</td>
+                <td style={{ ...s.td, fontWeight: 700, color: "#EC4899" }}>{formatCAD(Number(ref.commission_earned))}</td>
                 <td style={s.td}>
                   <span style={{
                     ...s.badge,
@@ -60,6 +71,9 @@ export default function AgentCommissionsPage() {
                 </td>
               </tr>
             ))}
+            {referrals.length === 0 && (
+              <tr><td colSpan={4} style={{...s.td, textAlign: "center"}}>No commissions earned yet.</td></tr>
+            )}
           </tbody>
         </table>
       </div>

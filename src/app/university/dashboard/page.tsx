@@ -1,22 +1,36 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_UNIVERSITY_STATS, MOCK_UNIVERSITY_INVOICES, MOCK_UNIVERSITY_SETTLEMENTS } from "@/lib/mock-data";
+import { getProfile, getUniversityContext, getUniversityStats, getUniversityInvoices, getUniversitySettlements } from "@/lib/data-access";
 import { formatCAD } from "@/lib/calculations";
 
-export default function UniversityDashboard() {
-  const stats = MOCK_UNIVERSITY_STATS;
-  const invoices = MOCK_UNIVERSITY_INVOICES.slice(0, 5);
-  const settlements = MOCK_UNIVERSITY_SETTLEMENTS.slice(0, 3);
+export default async function UniversityDashboard() {
+  const profile = await getProfile();
+  
+  if (!profile) {
+    return <div>Not authenticated</div>;
+  }
+
+  // Determine university context
+  const uni = await getUniversityContext();
+  
+  if (!uni) {
+    return <div>No university association found.</div>;
+  }
+
+  const stats = await getUniversityStats(uni.id);
+  const invoices = await getUniversityInvoices(uni.id);
+  const settlements = await getUniversitySettlements(uni.id);
+
+  const topInvoices = invoices.slice(0, 5);
+  const topSettlements = settlements.slice(0, 3);
 
   return (
-    <DashboardLayout role="university" userName="UofT Bursar">
+    <DashboardLayout role="university" userName={profile.full_name || "University Admin"}>
       {/* Welcome Banner */}
       <div style={s.banner}>
         <img src="/images/university-campus.png" alt="University campus" style={s.bannerImg} />
         <div style={s.bannerOverlay} />
         <div style={s.bannerContent}>
-          <h1 style={s.bannerTitle}>Institution Dashboard</h1>
+          <h1 style={s.bannerTitle}>{uni.name} Dashboard</h1>
           <p style={s.bannerSub}>Overview of EduKard tuition disbursements and pending invoices.</p>
         </div>
       </div>
@@ -51,11 +65,11 @@ export default function UniversityDashboard() {
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv) => (
+              {topInvoices.map((inv) => (
                 <tr key={inv.id}>
-                  <td style={s.td}><div>{inv.student_name}</div><div style={s.subText}>{inv.student_id}</div></td>
+                  <td style={s.td}><div>{inv.student_name}</div><div style={s.subText}>{inv.student_id_number}</div></td>
                   <td style={s.td}>{inv.program_name}</td>
-                  <td style={s.td}>{formatCAD(inv.tuition_amount)}</td>
+                  <td style={s.td}>{formatCAD(Number(inv.tuition_amount))}</td>
                   <td style={s.td}>
                     <span style={{
                       ...s.badge,
@@ -67,6 +81,11 @@ export default function UniversityDashboard() {
                   </td>
                 </tr>
               ))}
+              {topInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{...s.td, textAlign: "center", color: "#6B7280"}}>No invoices found</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -77,10 +96,10 @@ export default function UniversityDashboard() {
             <a href="/university/settlements" style={s.link}>View All</a>
           </div>
           <div style={s.list}>
-            {settlements.map((set) => (
+            {topSettlements.map((set) => (
               <div key={set.id} style={s.listItem}>
                 <div>
-                  <div style={s.itemTitle}>{formatCAD(set.amount)} {set.currency}</div>
+                  <div style={s.itemTitle}>{formatCAD(Number(set.amount))} {set.currency}</div>
                   <div style={s.itemDesc}>{set.student_count} students • {new Date(set.date).toLocaleDateString()}</div>
                 </div>
                 <span style={{
@@ -92,6 +111,9 @@ export default function UniversityDashboard() {
                 </span>
               </div>
             ))}
+            {topSettlements.length === 0 && (
+              <div style={{textAlign: "center", color: "#6B7280", padding: "16px"}}>No recent settlements</div>
+            )}
           </div>
         </div>
       </div>

@@ -34,11 +34,16 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  // Public routes
+  // Public routes.
+  // NOTE: provider webhooks (/api/webhooks/*) must never be auth-gated — they
+  // arrive without a user session and perform their own HMAC/signature
+  // verification inside each route handler. Gating them would redirect Stripe,
+  // Plaid, Circle and Sumsub to /login and silently drop every event.
   const publicRoutes = ["/", "/login", "/signup", "/verify-email", "/about", "/privacy", "/terms"];
-  const isPublicRoute = publicRoutes.some(
-    (route) => pathname === route || pathname.startsWith("/api/auth")
-  );
+  const isPublicRoute =
+    publicRoutes.includes(pathname) ||
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/webhooks");
 
   if (isPublicRoute) {
     return supabaseResponse;
@@ -61,12 +66,22 @@ export async function middleware(request: NextRequest) {
 
   const role = profile?.role || "student";
 
-  if (pathname.startsWith("/admin") && role !== "admin") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
+  // Role-based route protection mapping
+  const routeProtections: { [key: string]: string[] } = {
+    "/admin": ["admin"],
+    "/investor": ["investor", "admin"],
+    "/university": ["university", "admin"],
+    "/agent": ["agent", "admin"],
+    "/student": ["student", "admin"],
+  };
 
-  if (pathname.startsWith("/investor") && role !== "investor" && role !== "admin") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  // Check if current path matches any protected route prefix
+  for (const [routePrefix, allowedRoles] of Object.entries(routeProtections)) {
+    if (pathname.startsWith(routePrefix)) {
+      if (!allowedRoles.includes(role)) {
+        return NextResponse.redirect(new URL("/dashboard", request.url));
+      }
+    }
   }
 
   // Redirect /dashboard to the correct portal
@@ -75,6 +90,8 @@ export async function middleware(request: NextRequest) {
       student: "/student/dashboard",
       investor: "/investor/dashboard",
       admin: "/admin/dashboard",
+      university: "/university/dashboard",
+      agent: "/agent/dashboard",
     };
     return NextResponse.redirect(new URL(dashboardMap[role] || "/student/dashboard", request.url));
   }

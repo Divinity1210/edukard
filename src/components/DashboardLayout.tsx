@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { UserRole } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
 
 interface NavItem { label: string; href: string; icon: string; }
 
@@ -61,13 +62,45 @@ export default function DashboardLayout({ children, role, userName }: { children
   const items = NAV_ITEMS[role];
   const color = ROLE_COLORS[role];
   const [showNotifs, setShowNotifs] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const MOCK_NOTIFS = [
-    { id: "n1", text: "New loan application submitted", time: "2 min ago", icon: "📝" },
-    { id: "n2", text: "KYC verification approved", time: "1 hour ago", icon: "✅" },
-    { id: "n3", text: "Settlement batch completed", time: "3 hours ago", icon: "🏦" },
-    { id: "n4", text: "Commission payout processed", time: "Yesterday", icon: "💰" },
-  ];
+  useEffect(() => {
+    async function loadNotifs() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (data) {
+        setNotifications(data);
+        setUnreadCount(data.filter(n => !n.read).length);
+      }
+    }
+    loadNotifs();
+  }, []);
+
+  const markAllRead = async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+  };
+
+  const timeAgo = (dateStr: string) => {
+    const diff = Math.max(0, Date.now() - new Date(dateStr).getTime());
+    const min = Math.floor(diff / 60000);
+    if (min < 60) return `${min || 1} min ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr} hr ago`;
+    return `${Math.floor(hr / 24)}d ago`;
+  };
 
   return (
     <div style={s.layout}>
@@ -81,23 +114,34 @@ export default function DashboardLayout({ children, role, userName }: { children
           <div style={{ position: "relative" as const }}>
             <button style={s.bellBtn} onClick={() => setShowNotifs(!showNotifs)}>
               🔔
-              <span style={s.bellBadge}>3</span>
+              {unreadCount > 0 && <span style={s.bellBadge}>{unreadCount}</span>}
             </button>
             {showNotifs && (
               <div style={s.notifDropdown}>
                 <div style={s.notifHeader}>
                   <span style={{ fontSize: "14px", fontWeight: 700, color: "#F9FAFB" }}>Notifications</span>
-                  <button style={{ background: "none", border: "none", color: color, fontSize: "12px", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>
+                  {unreadCount > 0 && (
+                    <button onClick={markAllRead} style={{ background: "none", border: "none", color: color, fontSize: "12px", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>
+                  )}
                 </div>
-                {MOCK_NOTIFS.map(n => (
-                  <div key={n.id} style={s.notifItem}>
-                    <span style={{ fontSize: "18px", flexShrink: 0 }}>{n.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: "13px", color: "#D1D5DB", lineHeight: 1.5 }}>{n.text}</div>
-                      <div style={{ fontSize: "11px", color: "#6B7280", marginTop: "2px" }}>{n.time}</div>
-                    </div>
+                {notifications.length === 0 ? (
+                  <div style={{ padding: "16px", fontSize: "13px", color: "#6B7280", textAlign: "center" }}>No notifications yet</div>
+                ) : (
+                  <div style={{ maxHeight: "350px", overflowY: "auto" }}>
+                    {notifications.map(n => (
+                      <div key={n.id} style={{ ...s.notifItem, opacity: n.read ? 0.7 : 1, background: n.read ? "transparent" : "rgba(255,255,255,0.02)" }}>
+                        <span style={{ fontSize: "18px", flexShrink: 0 }}>
+                          {n.type === "success" ? "✅" : n.type === "warning" ? "⚠️" : n.type === "error" ? "❌" : "🔔"}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: "13px", color: n.read ? "#9CA3AF" : "#F9FAFB", lineHeight: 1.4, fontWeight: n.read ? 400 : 500 }}>{n.title}</div>
+                          <div style={{ fontSize: "12px", color: "#6B7280", marginTop: "2px", lineHeight: 1.4 }}>{n.message}</div>
+                          <div style={{ fontSize: "11px", color: "#6B7280", marginTop: "4px" }}>{timeAgo(n.created_at)}</div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>

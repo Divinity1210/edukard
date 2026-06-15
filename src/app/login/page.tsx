@@ -1,23 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { login } from "./actions";
 
 function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [password, setPassword] = useState("demo123");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true);
-    setTimeout(() => {
-      if (email.includes("admin")) router.push("/admin/dashboard");
-      else if (email.includes("investor") || email.includes("capital")) router.push("/investor/dashboard");
-      else if (email.includes("university") || email.includes("bursar")) router.push("/university/dashboard");
-      else if (email.includes("agent") || email.includes("partner")) router.push("/agent/dashboard");
-      else router.push("/student/dashboard");
-    }, 800);
+    e.preventDefault(); 
+    setError(null);
+    
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.append("email", email);
+      formData.append("password", password);
+      
+      const redirectPath = searchParams.get("redirect");
+      if (redirectPath) formData.append("redirect", redirectPath);
+      
+      const result = await login(formData);
+      if (result?.error) {
+        setError(result.error);
+      }
+    });
   };
 
   return (
@@ -29,9 +41,10 @@ function LoginForm() {
           <h1 style={s.title}>Welcome back</h1>
           <p style={s.subtitle}>Sign in to your account</p>
           <form onSubmit={handleLogin} style={s.form}>
+            {error && <div style={s.errorMessage}>{error}</div>}
             <div style={s.field}><label style={s.label}>Email address</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@university.ca" style={s.input} required /></div>
-            <div style={s.field}><label style={s.label}>Password</label><input type="password" placeholder="••••••••" style={s.input} defaultValue="demo123" required /></div>
-            <button type="submit" style={s.submitBtn} disabled={loading}>{loading ? <span style={s.spinner} /> : "Sign In"}</button>
+            <div style={s.field}><label style={s.label}>Password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={s.input} required /></div>
+            <button type="submit" style={s.submitBtn} disabled={isPending}>{isPending ? <span style={s.spinner} /> : "Sign In"}</button>
           </form>
           <div style={s.divider}><span style={s.dividerLine} /><span style={s.dividerText}>or</span><span style={s.dividerLine} /></div>
           <div style={s.socialBtns}>
@@ -39,7 +52,7 @@ function LoginForm() {
             <button style={s.socialBtn} onClick={() => router.push("/student/dashboard")}>Apple</button>
           </div>
           <p style={s.footerText}>Don&apos;t have an account? <a href="/signup" style={s.link}>Sign up</a></p>
-          <div style={s.demoHint}><strong>Demo:</strong> Use email with &quot;admin&quot;, &quot;investor&quot;, &quot;university&quot;, &quot;agent&quot;, or &quot;student&quot; to access different portals.</div>
+          <div style={s.demoHint}><strong>Note:</strong> We are transitioning to robust Supabase Authentication. The mock login system has been replaced.</div>
         </div>
       </div>
     </div>
@@ -74,4 +87,5 @@ const s: Record<string, React.CSSProperties> = {
   footerText: { textAlign: "center" as const, fontSize: "14px", color: "#6B7280", marginTop: "24px" },
   link: { color: "#10B981", fontWeight: 600 },
   demoHint: { marginTop: "20px", padding: "12px", borderRadius: "10px", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.15)", fontSize: "12px", color: "#10B981", textAlign: "center" as const, lineHeight: 1.5 },
+  errorMessage: { padding: "10px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#EF4444", fontSize: "13px", textAlign: "center" as const }
 };

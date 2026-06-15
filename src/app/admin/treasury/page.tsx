@@ -1,19 +1,32 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_POOLS } from "@/lib/mock-data";
+import { getProfile, getTreasuryData } from "@/lib/data-access";
 import { formatCAD, formatPercent } from "@/lib/calculations";
-import { useState } from "react";
+import OriginationToggle from "./OriginationToggle";
 
-export default function TreasuryPage() {
-  const pools = MOCK_POOLS;
-  const [paused, setPaused] = useState(false);
-  const totalTVL = pools.reduce((s, p) => s + p.total_capital, 0);
-  const totalDeployed = pools.reduce((s, p) => s + p.deployed_capital, 0);
-  const overallUtil = Math.round((totalDeployed / totalTVL) * 100);
+export const dynamic = "force-dynamic";
+
+type PoolRow = { id: string; tranche: "senior" | "junior"; target_apy: number };
+
+export default async function TreasuryPage() {
+  const profile = await getProfile();
+  const t = await getTreasuryData();
+
+  const totalTVL = t.total_capital;
+  const totalDeployed = t.deployed_capital;
+  const overallUtil = totalTVL > 0 ? Math.round((totalDeployed / totalTVL) * 100) : 0;
+
+  // Deployment isn't tracked per-tranche yet, so allocate the live deployed
+  // total proportionally to each pool's capital (reasonable pilot approximation).
+  const pools = (t.pools as PoolRow[]).map((p) => {
+    const capital = p.tranche === "senior" ? t.senior_capital : t.junior_capital;
+    const deployed = totalTVL > 0 ? totalDeployed * (capital / totalTVL) : 0;
+    const available = Math.max(0, capital - deployed);
+    const utilization_ratio = capital > 0 ? Math.round((deployed / capital) * 100) : 0;
+    return { id: p.id, tranche: p.tranche, target_apy: p.target_apy, total_capital: capital, deployed_capital: deployed, available_capital: available, utilization_ratio };
+  });
 
   return (
-    <DashboardLayout role="admin" userName="Admin User">
+    <DashboardLayout role="admin" userName={profile?.full_name || "Admin User"}>
       <h1 style={s.title}>Treasury & Liquidity</h1>
       <p style={s.subtitle}>Monitor protocol liquidity, pool utilization, and manage origination controls.</p>
 
@@ -26,7 +39,7 @@ export default function TreasuryPage() {
           { icon: "🔒", value: formatCAD(totalTVL), label: "Total TVL" },
           { icon: "📤", value: formatCAD(totalDeployed), label: "Deployed Capital" },
           { icon: "📊", value: formatPercent(overallUtil), label: "Overall Utilization", color: overallUtil > 90 ? "#EF4444" : "#10B981" },
-          { icon: "💰", value: formatCAD(totalTVL - totalDeployed), label: "Available Liquidity", color: "#10B981" },
+          { icon: "💰", value: formatCAD(t.available_capital), label: "Available Liquidity", color: "#10B981" },
         ].map((stat) => (
           <div key={stat.label} style={s.statCard}>
             <span style={s.statIcon}>{stat.icon}</span>
@@ -38,6 +51,9 @@ export default function TreasuryPage() {
 
       <div style={s.section}>
         <h2 style={s.sectionTitle}>Pool Details</h2>
+        {pools.length === 0 && (
+          <div style={s.controlCard}><p style={{ color: "#9CA3AF" }}>No liquidity pools configured. Run supabase/seed.sql.</p></div>
+        )}
         <div style={s.poolGrid}>
           {pools.map((pool) => (
             <div key={pool.id} style={s.poolCard}>
@@ -59,12 +75,7 @@ export default function TreasuryPage() {
 
       <div style={s.section}>
         <h2 style={s.sectionTitle}>Origination Controls</h2>
-        <div style={s.controlCard}>
-          <div style={s.controlRow}>
-            <div><div style={s.controlTitle}>Pause New Loan Originations</div><div style={s.controlDesc}>When enabled, no new loan applications will be processed. Existing loans are unaffected.</div></div>
-            <button onClick={() => setPaused(!paused)} style={{ ...s.toggleBtn, background: paused ? "#EF4444" : "#10B981" }}>{paused ? "PAUSED" : "ACTIVE"}</button>
-          </div>
-        </div>
+        <OriginationToggle />
       </div>
     </DashboardLayout>
   );
@@ -91,8 +102,4 @@ const s: Record<string, React.CSSProperties> = {
   pdLabel: { display: "block", fontSize: "11px", color: "#6B7280", marginBottom: "2px" },
   pdValue: { display: "block", fontSize: "15px", fontWeight: 700, color: "#F9FAFB" },
   controlCard: { background: "rgba(17,24,39,0.6)", backdropFilter: "blur(12px)", border: "1px solid rgba(75,85,99,0.25)", borderRadius: "14px", padding: "24px" },
-  controlRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "20px" },
-  controlTitle: { fontSize: "16px", fontWeight: 700, color: "#F9FAFB" },
-  controlDesc: { fontSize: "13px", color: "#6B7280", marginTop: "6px", maxWidth: "500px" },
-  toggleBtn: { padding: "10px 24px", borderRadius: "10px", color: "#fff", fontSize: "13px", fontWeight: 800, border: "none", cursor: "pointer", letterSpacing: "1px", minWidth: "100px" },
 };

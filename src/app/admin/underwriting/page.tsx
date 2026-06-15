@@ -1,47 +1,69 @@
-"use client";
-
 import DashboardLayout from "@/components/DashboardLayout";
-import { MOCK_PENDING_APPLICATIONS, MOCK_APPLICANT_NAMES } from "@/lib/mock-data";
+import { getProfile, getAdminPendingLoans } from "@/lib/data-access";
+import { approveLoan } from "@/lib/actions/admin";
 import { formatCAD, formatDate } from "@/lib/calculations";
 
-export default function UnderwritingPage() {
-  const apps = MOCK_PENDING_APPLICATIONS;
+export const dynamic = "force-dynamic";
+
+type QueueRow = {
+  id: string;
+  loan_amount: number;
+  term_months: number;
+  apr: number;
+  monthly_payment: number;
+  risk_flag: "green" | "yellow" | "red";
+  created_at: string;
+  profiles?: { full_name?: string } | null;
+  university?: { name?: string } | null;
+};
+
+export default async function UnderwritingPage() {
+  const profile = await getProfile();
+  const apps = (await getAdminPendingLoans()) as QueueRow[];
+
   const riskColors: Record<string, string> = { green: "#10B981", yellow: "#F59E0B", red: "#EF4444" };
   const riskBg: Record<string, string> = { green: "rgba(16,185,129,0.12)", yellow: "rgba(245,158,11,0.12)", red: "rgba(239,68,68,0.12)" };
 
   return (
-    <DashboardLayout role="admin" userName="Admin User">
+    <DashboardLayout role="admin" userName={profile?.full_name || "Admin User"}>
       <h1 style={s.title}>Underwriting Queue</h1>
       <p style={s.subtitle}>Review and action pending loan applications with algorithmic risk scoring.</p>
 
       <div style={s.filters}>
         <button style={{ ...s.filterBtn, ...s.filterActive }}>All ({apps.length})</button>
-        <button style={s.filterBtn}>🟢 Low Risk</button>
-        <button style={s.filterBtn}>🟡 Medium Risk</button>
-        <button style={s.filterBtn}>🔴 High Risk</button>
+        <button style={s.filterBtn}>🟢 Low Risk ({apps.filter(a => a.risk_flag === "green").length})</button>
+        <button style={s.filterBtn}>🟡 Medium Risk ({apps.filter(a => a.risk_flag === "yellow").length})</button>
+        <button style={s.filterBtn}>🔴 High Risk ({apps.filter(a => a.risk_flag === "red").length})</button>
       </div>
+
+      {apps.length === 0 && (
+        <div style={s.appCard}><p style={{ color: "#9CA3AF" }}>No applications awaiting review.</p></div>
+      )}
 
       <div style={s.appList}>
         {apps.map((app) => (
           <div key={app.id} style={s.appCard}>
             <div style={s.appHeader}>
               <div>
-                <div style={s.appName}>{MOCK_APPLICANT_NAMES[app.user_id] || "Unknown"}</div>
-                <div style={s.appMeta}>Applied {formatDate(app.created_at)} · {app.university_name}</div>
+                <div style={s.appName}>{app.profiles?.full_name || "Unknown"}</div>
+                <div style={s.appMeta}>Applied {formatDate(app.created_at)} · {app.university?.name || "—"}</div>
               </div>
               <span style={{ ...s.riskBadge, background: riskBg[app.risk_flag], color: riskColors[app.risk_flag] }}>
                 {app.risk_flag === "green" ? "● LOW RISK" : app.risk_flag === "yellow" ? "● MEDIUM RISK" : "● HIGH RISK"}
               </span>
             </div>
             <div style={s.appDetails}>
-              <div><span style={s.detLabel}>Amount</span><span style={s.detValue}>{formatCAD(app.loan_amount)}</span></div>
+              <div><span style={s.detLabel}>Amount</span><span style={s.detValue}>{formatCAD(Number(app.loan_amount))}</span></div>
               <div><span style={s.detLabel}>Term</span><span style={s.detValue}>{app.term_months} months</span></div>
               <div><span style={s.detLabel}>APR</span><span style={s.detValue}>{app.apr}%</span></div>
-              <div><span style={s.detLabel}>Monthly</span><span style={s.detValue}>{formatCAD(app.monthly_payment)}</span></div>
+              <div><span style={s.detLabel}>Monthly</span><span style={s.detValue}>{formatCAD(Number(app.monthly_payment))}</span></div>
             </div>
             <div style={s.appActions}>
-              <button style={s.approveBtn}>✓ Approve</button>
-              <button style={s.rejectBtn}>✕ Reject</button>
+              <form action={async (fd: FormData) => { "use server"; await approveLoan(fd); }}>
+                <input type="hidden" name="loanId" value={app.id} />
+                <button type="submit" style={s.approveBtn}>✓ Approve</button>
+              </form>
+              <a href={`/admin/underwriting/${app.id}`} style={s.rejectLink}>✕ Reject (needs reason)</a>
               <a href={`/admin/underwriting/${app.id}`} style={s.reviewBtn}>Review Details →</a>
             </div>
           </div>
@@ -66,8 +88,8 @@ const s: Record<string, React.CSSProperties> = {
   appDetails: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "16px", marginBottom: "20px" },
   detLabel: { display: "block", fontSize: "12px", color: "#6B7280" },
   detValue: { display: "block", fontSize: "16px", fontWeight: 700, color: "#F9FAFB" },
-  appActions: { display: "flex", gap: "10px", paddingTop: "16px", borderTop: "1px solid rgba(75,85,99,0.15)" },
+  appActions: { display: "flex", gap: "10px", paddingTop: "16px", borderTop: "1px solid rgba(75,85,99,0.15)", alignItems: "center" },
   approveBtn: { padding: "10px 20px", borderRadius: "10px", background: "rgba(16,185,129,0.12)", color: "#10B981", border: "none", fontSize: "14px", fontWeight: 700, cursor: "pointer" },
-  rejectBtn: { padding: "10px 20px", borderRadius: "10px", background: "rgba(239,68,68,0.12)", color: "#EF4444", border: "none", fontSize: "14px", fontWeight: 700, cursor: "pointer" },
-  reviewBtn: { padding: "10px 20px", borderRadius: "10px", border: "1px solid rgba(75,85,99,0.25)", background: "rgba(17,24,39,0.6)", color: "#6B7280", fontSize: "14px", fontWeight: 600, cursor: "pointer", marginLeft: "auto" },
+  rejectLink: { padding: "10px 20px", borderRadius: "10px", background: "rgba(239,68,68,0.12)", color: "#EF4444", fontSize: "14px", fontWeight: 700, cursor: "pointer", textDecoration: "none" },
+  reviewBtn: { padding: "10px 20px", borderRadius: "10px", border: "1px solid rgba(75,85,99,0.25)", background: "rgba(17,24,39,0.6)", color: "#6B7280", fontSize: "14px", fontWeight: 600, cursor: "pointer", marginLeft: "auto", textDecoration: "none" },
 };
