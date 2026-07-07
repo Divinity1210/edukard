@@ -251,3 +251,196 @@ export async function logCommunication(formData: FormData) {
   revalidatePath("/admin/collections");
   return { success: true };
 }
+
+// ===== PARTNER MANAGEMENT =====
+
+const UniversitySchema = z.object({
+  name: z.string().min(2).max(200),
+  dliNumber: z.string().min(3).max(40),
+  province: z.string().min(2).max(60),
+  city: z.string().min(2).max(100),
+  contactEmail: z.string().email(),
+});
+
+/** Onboard a partner university. Runs as the admin (RLS universities_admin_write). */
+export async function addUniversity(formData: FormData) {
+  const { supabase, user, isAdmin } = await requireAdmin();
+  if (!isAdmin || !user) return { error: "Not authorized" };
+
+  const parsed = UniversitySchema.safeParse({
+    name: formData.get("name"),
+    dliNumber: formData.get("dliNumber"),
+    province: formData.get("province"),
+    city: formData.get("city"),
+    contactEmail: formData.get("contactEmail"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  const slug = parsed.data.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 60);
+
+  const { data: uni, error } = await supabase
+    .from("universities")
+    .insert({
+      name: parsed.data.name,
+      dli_number: parsed.data.dliNumber,
+      province: parsed.data.province,
+      city: parsed.data.city,
+      contact_email: parsed.data.contactEmail,
+      status: "pending",
+      slug,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+
+  await supabase.from("audit_logs").insert({
+    actor_id: user.id,
+    action: "partner.university_added",
+    entity_type: "university",
+    entity_id: uni.id,
+    details: { name: parsed.data.name, dli: parsed.data.dliNumber },
+  });
+
+  revalidatePath("/admin/partners");
+  return { success: true };
+}
+
+const UniversityStatusSchema = z.object({
+  universityId: z.string().uuid(),
+  status: z.enum(["active", "pending", "inactive"]),
+});
+
+export async function setUniversityStatus(formData: FormData) {
+  const { supabase, user, isAdmin } = await requireAdmin();
+  if (!isAdmin || !user) return { error: "Not authorized" };
+
+  const parsed = UniversityStatusSchema.safeParse({
+    universityId: formData.get("universityId"),
+    status: formData.get("status"),
+  });
+  if (!parsed.success) return { error: "Invalid request" };
+
+  const { error } = await supabase
+    .from("universities")
+    .update({ status: parsed.data.status })
+    .eq("id", parsed.data.universityId);
+  if (error) return { error: error.message };
+
+  await supabase.from("audit_logs").insert({
+    actor_id: user.id,
+    action: "partner.university_status",
+    entity_type: "university",
+    entity_id: parsed.data.universityId,
+    details: { status: parsed.data.status },
+  });
+
+  revalidatePath("/admin/partners");
+  return { success: true };
+}
+
+const AgentSchema = z.object({
+  companyName: z.string().min(2).max(200),
+  contactName: z.string().min(2).max(120),
+  email: z.string().email(),
+  territory: z.string().min(2).max(100),
+  commissionRate: z.coerce.number().min(0).max(25),
+});
+
+/**
+ * Onboard a referral agent. Creates the auth user (service role — auth admin
+ * API and cross-user profile write are not possible under RLS), assigns the
+ * agent role, and generates a referral code. Returns a one-time temporary
+ * password for the admin to hand to the partner.
+ */
+export async function addAgent(formData: FormData) {
+  const { supabase, user, isAdmin } = await requireAdmin();
+  if (!isAdmin || !user) return { error: "Not authorized" };
+
+  const parsed = AgentSchema.safeParse({
+    companyName: formData.get("companyName"),
+    contactName: formData.get("contactName"),
+    email: formData.get("email"),
+    territory: formData.get("territory"),
+    commissionRate: formData.get("commissionRate") || 10,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const { randomBytes } = await import("node:crypto");
+  const admin = createAdminClient();
+
+  const tempPassword = randomBytes(9).toString("base64url");
+  const { data: created, error: authError } = await admin.auth.admin.createUser({
+    email: parsed.data.email,
+    password: tempPassword,
+    email_confirm: true,
+    user_metadata: { full_name: parsed.data.contactName },
+  });
+  if (authError || !created.user) return { error: authError?.message ?? "Could not create user" };
+  const agentId = created.user.id;
+
+  // Referral code: company initials + year + random suffix, e.g. GEP-2026-4F7K.
+  const initials = parsed.data.companyName
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 4);
+  const referralCode = `${initials}-${new Date().getFullYear()}-${randomBytes(2).toString("hex").toUpperCase()}`;
+
+  // The on-signup trigger created a student profile row; promote + attach.
+  const { error: roleError } = await admin.from("profiles").update({ role: "agent" }).eq("id", agentId);
+  const { error: agentError } = await admin.from("agent_profiles").insert({
+    id: agentId,
+    company_name: parsed.data.companyName,
+    territory: parsed.data.territory,
+    commission_rate: parsed.data.commissionRate / 100,
+    referral_code: referralCode,
+  });
+  if (roleError || agentError) {
+    // Roll back the half-created account so the email isn't burned.
+    await admin.auth.admin.deleteUser(agentId);
+    return { error: (roleError ?? agentError)?.message ?? "Could not create agent profile" };
+  }
+
+  await supabase.from("audit_logs").insert({
+    actor_id: user.id,
+    action: "partner.agent_added",
+    entity_type: "agent",
+    entity_id: agentId,
+    details: { company: parsed.data.companyName, referral_code: referralCode },
+  });
+
+  revalidatePath("/admin/partners");
+  return { success: true, referralCode, tempPassword, email: parsed.data.email };
+}
+
+// ===== PROTOCOL SETTINGS =====
+
+/** Persist the origination kill-switch (admin-only via RLS). */
+export async function setOriginationsPaused(formData: FormData) {
+  const { supabase, user, isAdmin } = await requireAdmin();
+  if (!isAdmin || !user) return { error: "Not authorized" };
+
+  const paused = formData.get("paused") === "true";
+  const { error } = await supabase
+    .from("protocol_settings")
+    .update({ originations_paused: paused, updated_by: user.id, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) return { error: error.message };
+
+  await supabase.from("audit_logs").insert({
+    actor_id: user.id,
+    action: paused ? "protocol.originations_paused" : "protocol.originations_resumed",
+    entity_type: "protocol_settings",
+    entity_id: "1",
+    details: { paused },
+  });
+
+  revalidatePath("/admin/treasury");
+  return { success: true, paused };
+}

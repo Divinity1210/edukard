@@ -1,5 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
-import { getProfile, getTreasuryData } from "@/lib/data-access";
+import { getProfile, getTreasuryData, getOriginationsPaused } from "@/lib/data-access";
 import { formatCAD, formatPercent } from "@/lib/calculations";
 import OriginationToggle from "./OriginationToggle";
 
@@ -10,6 +10,7 @@ type PoolRow = { id: string; tranche: "senior" | "junior"; target_apy: number };
 export default async function TreasuryPage() {
   const profile = await getProfile();
   const t = await getTreasuryData();
+  const originationsPaused = await getOriginationsPaused();
 
   const totalTVL = t.total_capital;
   const totalDeployed = t.deployed_capital;
@@ -75,7 +76,7 @@ export default async function TreasuryPage() {
 
       <div style={s.section}>
         <h2 style={s.sectionTitle}>Origination Controls</h2>
-        <OriginationToggle />
+        <OriginationToggle initialPaused={originationsPaused} />
       </div>
     </DashboardLayout>
   );
