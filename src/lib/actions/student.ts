@@ -50,13 +50,24 @@ export async function submitLoanApplication(formData: FormData) {
   }
   const input = parsed.data;
 
-  // Resolve university by UUID or slug.
-  const uniQuery = supabase.from("universities").select("id").limit(1);
+  // Origination kill-switch (admin/treasury). Checked server-side so it can't
+  // be bypassed by a stale client.
+  const { data: settings } = await supabase
+    .from("protocol_settings")
+    .select("originations_paused")
+    .eq("id", 1)
+    .maybeSingle();
+  if (settings?.originations_paused) {
+    return { error: "New loan originations are temporarily paused. Please try again later." };
+  }
+
+  // Resolve university by UUID or slug. Only active partners accept new loans.
+  const uniQuery = supabase.from("universities").select("id").eq("status", "active").limit(1);
   const { data: uni } = UUID_RE.test(input.universityRef)
     ? await uniQuery.eq("id", input.universityRef).single()
     : await uniQuery.eq("slug", input.universityRef).single();
 
-  if (!uni) return { error: "Selected university not found" };
+  if (!uni) return { error: "Selected university not found or not currently accepting EduKard financing" };
 
   // Credit decision. Pull the latest assessment if present, else use any
   // income figures supplied on the form (from Plaid-backed onboarding).

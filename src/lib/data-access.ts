@@ -582,3 +582,72 @@ export async function getNotifications(userId: string) {
     .limit(50);
   return data || [];
 }
+
+// ===== ADMIN: PARTNER MANAGEMENT =====
+
+export async function getAdminUniversities() {
+  const supabase = await createClient();
+  const [{ data: unis }, { data: loans }] = await Promise.all([
+    supabase
+      .from("universities")
+      .select("id, name, dli_number, province, city, contact_email, status, created_at")
+      .order("name"),
+    supabase
+      .from("loan_applications")
+      .select("university_id, loan_amount, status")
+      .in("status", ["disbursing", "disbursed", "repaying", "paid_off"]),
+  ]);
+
+  const funded = new Map<string, { count: number; total: number }>();
+  for (const loan of loans || []) {
+    const agg = funded.get(loan.university_id) || { count: 0, total: 0 };
+    agg.count += 1;
+    agg.total += Number(loan.loan_amount) || 0;
+    funded.set(loan.university_id, agg);
+  }
+
+  return (unis || []).map((u) => ({
+    ...u,
+    students_funded: funded.get(u.id)?.count ?? 0,
+    total_disbursed: funded.get(u.id)?.total ?? 0,
+  }));
+}
+
+export async function getAdminAgents() {
+  const supabase = await createClient();
+  const [{ data: agents }, { data: referrals }] = await Promise.all([
+    supabase
+      .from("agent_profiles")
+      .select("id, company_name, territory, commission_rate, referral_code, created_at, profile:profiles(full_name, email)")
+      .order("created_at", { ascending: false }),
+    supabase.from("agent_referrals").select("agent_id, commission_earned, commission_status"),
+  ]);
+
+  const stats = new Map<string, { referrals: number; earned: number }>();
+  for (const r of referrals || []) {
+    const agg = stats.get(r.agent_id) || { referrals: 0, earned: 0 };
+    agg.referrals += 1;
+    if (r.commission_status === "paid") {
+      agg.earned += Number(r.commission_earned) || 0;
+    }
+    stats.set(r.agent_id, agg);
+  }
+
+  return (agents || []).map((a) => ({
+    ...a,
+    total_referrals: stats.get(a.id)?.referrals ?? 0,
+    total_earned: stats.get(a.id)?.earned ?? 0,
+  }));
+}
+
+/** Origination kill-switch state. Reads fail open (not paused) — enforcement
+ *  happens in submitLoanApplication, which re-reads it. */
+export async function getOriginationsPaused(): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("protocol_settings")
+    .select("originations_paused")
+    .eq("id", 1)
+    .maybeSingle();
+  return data?.originations_paused ?? false;
+}
